@@ -132,7 +132,9 @@ internal object RootlessLinuxInstaller {
                     val mirror = DebianEnvironmentInstaller.APT_MIRRORS.first()
                     File(staging, "etc/apt/sources.list").writeText("deb ${mirror.archiveBaseUrl} trixie main\ndeb ${mirror.archiveBaseUrl} trixie-updates main\ndeb ${mirror.securityBaseUrl} trixie-security main\n")
                     File(staging, "etc/apt/apt.conf.d").mkdirs()
-                    File(staging, "etc/apt/apt.conf.d/99eta-rootless").writeText("APT::Sandbox::User \"root\";\nAcquire::Retries \"2\";\n")
+                    File(staging, "etc/apt/apt.conf.d/99eta-rootless").writeText(
+                        "APT::Sandbox::User \"root\";\nAcquire::Retries \"2\";\nAcquire::Languages \"none\";\n",
+                    )
                     File(staging, "usr/sbin/policy-rc.d").apply { writeText("#!/bin/sh\nexit 101\n"); setExecutable(true, false) }
                     "eta-apt" to DebianEnvironmentInstaller.aptMirrorScript()
                 }

@@ -232,6 +232,8 @@ internal class DebianEnvironmentInstaller(
             Acquire::Retries "2";
             Acquire::http::Pipeline-Depth "0";
             Acquire::https::Pipeline-Depth "0";
+            // 代理链路带宽有限，跳过体积很大的 Translation 索引
+            Acquire::Languages "none";
             ETA_APT_CONFIG_EOF
             printf '%s\n' \
               ${shellQuote("deb ${APT_MIRRORS.first().archiveBaseUrl} trixie main")} \
