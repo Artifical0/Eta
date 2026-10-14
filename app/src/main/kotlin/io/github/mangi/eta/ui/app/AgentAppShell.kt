@@ -102,7 +102,13 @@ internal fun AgentAppShell(
     onOpenCharacters: () -> Unit,
     onOpenPermissions: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenRootSettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     onOpenModelProviders: () -> Unit,
+    onOpenTasks: () -> Unit,
+    onOpenNotifications: () -> Unit = {},
+    notificationCount: Int = 0,
+    conversationStatus: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
     homeCharacter: RoleplayChatUi? = null,
     onOpenCharacter: () -> Unit = {},
@@ -136,6 +142,7 @@ internal fun AgentAppShell(
                             onOpenBrowser = onOpenBrowser,
                             homeCharacter = homeCharacter,
                             onOpenCharacter = onOpenCharacter,
+                            conversationStatus = conversationStatus,
                         )
                     }
                 }
@@ -161,16 +168,22 @@ internal fun AgentAppShell(
                 onOpen = onOpenConversationPane,
                 onDismiss = onDismissConversationPane,
                 onSearchChange = onSearchConversations,
+                onNewConversation = onNewConversation,
                 onConversationSelected = onSelectConversation,
                 onConversationRename = onConversationRename,
                 onConversationExport = onConversationExport,
                 onConversationDelete = onConversationDelete,
                 onOpenSettings = onOpenSettings,
+                onOpenRootSettings = onOpenRootSettings,
+                onOpenAccessibilitySettings = onOpenAccessibilitySettings,
                 onOpenModelProviders = onOpenModelProviders,
                 onOpenTools = onOpenTools,
                 onOpenSkills = onOpenSkills,
                 onOpenCharacters = onOpenCharacters,
                 onOpenPermissions = onOpenPermissions,
+                onOpenTasks = onOpenTasks,
+                onOpenNotifications = onOpenNotifications,
+                notificationCount = notificationCount,
             ) {
                 pageContent()
             }
@@ -197,6 +210,7 @@ private fun AgentTopBar(
     onOpenBrowser: () -> Unit,
     homeCharacter: RoleplayChatUi?,
     onOpenCharacter: () -> Unit,
+    conversationStatus: (@Composable () -> Unit)?,
 ) {
     val isHome = route is AppRoute.Home
     val navigationIcon: @Composable () -> Unit = {
@@ -221,6 +235,7 @@ private fun AgentTopBar(
     val actions: @Composable RowScope.() -> Unit = {
         if (isHome) {
             SpeechAutoReadToggle()
+            conversationStatus?.invoke()
             TopBarOverflowMenu(
                 onNewConversation = onNewConversation,
                 onOpenTerminal = onOpenTerminal,
@@ -393,6 +408,9 @@ private fun titleForRoute(route: AppRoute?): String = when (route) {
     is AppRoute.CharacterDetail -> "角色详情"
     is AppRoute.CharacterEditor -> "编辑角色"
     is AppRoute.CharacterPersona -> "我的人设"
+    is AppRoute.DefaultAssistantPrompt -> stringResource(R.string.default_prompt_title)
+    is AppRoute.Notifications -> stringResource(R.string.inbox_title)
+    is AppRoute.LearningProposalDetail -> stringResource(R.string.inbox_detail)
     is AppRoute.CharacterMemory -> "剧情记忆"
     is AppRoute.Permissions -> stringResource(R.string.route_permissions)
     is AppRoute.SystemEnhance -> stringResource(R.string.route_system_enhancements)
@@ -404,6 +422,8 @@ private fun titleForRoute(route: AppRoute?): String = when (route) {
     is AppRoute.AppearanceSettings -> stringResource(R.string.appearance_title)
     is AppRoute.DataBackup -> stringResource(R.string.data_backup_title)
     is AppRoute.Memory -> stringResource(R.string.route_memory)
+    is AppRoute.Tasks -> stringResource(R.string.automation_title)
+    is AppRoute.VirtualScreen -> stringResource(R.string.virtual_screen_title)
     is AppRoute.LinuxEnvironment -> stringResource(R.string.route_linux_environment)
     is AppRoute.Workspace -> stringResource(R.string.capability_workspace)
     is AppRoute.SharedFolders -> stringResource(R.string.route_shared_folders)

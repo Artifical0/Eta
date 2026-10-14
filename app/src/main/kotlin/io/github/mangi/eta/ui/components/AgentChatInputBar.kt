@@ -146,6 +146,8 @@ internal fun AgentChatInputBar(
     val canSend = textFieldState.text.isNotBlank() ||
         pendingImages.isNotEmpty() ||
         pendingFileReferences.isNotEmpty()
+    val canInterject = isStreaming && !isCompacting && textFieldState.text.isNotBlank() &&
+        pendingImages.isEmpty() && pendingFileReferences.isEmpty()
     val density = LocalDensity.current
     val statusBarTopPx = WindowInsets.statusBars.getTop(density)
     var inputContainerTopPx by remember { mutableIntStateOf(0) }
@@ -165,6 +167,11 @@ internal fun AgentChatInputBar(
             keyboard?.show()
         }
         wasEditingMessage = isEditingMessage
+    }
+
+    LaunchedEffect(input) {
+        // A delayed rejected interjection must not overwrite a newer draft typed while awaiting its ACK.
+        if (!isEditingMessage && textFieldState.text.isBlank()) textFieldState.setTextAndPlaceCursorAtEnd(input)
     }
 
     LaunchedEffect(isStreaming, isCompacting) {
@@ -265,11 +272,12 @@ internal fun AgentChatInputBar(
                     if (textFieldState.text.isBlank()) {
                         Text(
                             text = when {
+                                isCompacting -> stringResource(R.string.chat_eta_working)
                                 // 角色对话的占位文字跟随角色，避免“交给 Eta”打断沉浸感。
                                 character != null && isStreaming ->
                                     stringResource(R.string.chat_character_typing, character.characterName)
                                 character != null -> stringResource(R.string.chat_character_input_hint, character.characterName)
-                                isStreaming -> stringResource(R.string.chat_eta_working)
+                                isStreaming -> stringResource(R.string.chat_interject_hint)
                                 else -> stringResource(R.string.chat_input_hint)
                             },
                             style = inputTextStyle,
@@ -352,8 +360,17 @@ internal fun AgentChatInputBar(
                             onModelSelected = onModelSelected,
                         )
 
+                        if (canInterject) IconButton(onClick = onStop, minWidth = ChatInputActionSize, minHeight = ChatInputActionSize) {
+                            Icon(
+                                imageVector = Icons.Rounded.Stop,
+                                contentDescription = stringResource(R.string.chat_stop),
+                                modifier = Modifier.size(StopIconSize),
+                                tint = MiuixTheme.colorScheme.onSurface,
+                            )
+                        }
+
                         IconButton(
-                            onClick = if (isStreaming) {
+                            onClick = if (isStreaming && !canInterject) {
                                 onStop
                             } else {
                                 {
@@ -372,7 +389,7 @@ internal fun AgentChatInputBar(
                             // 保留统一的点击区域，仅让可见圆形与相邻操作图标保持同一尺寸。
                             val sendButtonColor by animateColorAsState(
                                 targetValue = when {
-                                    isStreaming -> MiuixTheme.colorScheme.onSurface
+                                    isStreaming && !canInterject -> MiuixTheme.colorScheme.onSurface
                                     canSend -> MiuixTheme.colorScheme.primary
                                     else -> MiuixTheme.colorScheme.surfaceContainerHigh
                                 },
@@ -387,7 +404,7 @@ internal fun AgentChatInputBar(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 AnimatedContent(
-                                    targetState = isStreaming,
+                                    targetState = isStreaming && !canInterject,
                                     transitionSpec = {
                                         (fadeIn(tween(130)) + scaleIn(tween(160), initialScale = 0.72f))
                                             .togetherWith(
@@ -405,6 +422,7 @@ internal fun AgentChatInputBar(
                                         },
                                         contentDescription = when {
                                             streaming -> stringResource(R.string.chat_stop)
+                                            canInterject -> stringResource(R.string.overlay_supplement)
                                             isEditingMessage && preserveFollowingMessages -> stringResource(R.string.chat_save_message)
                                             else -> stringResource(R.string.chat_send)
                                         },
