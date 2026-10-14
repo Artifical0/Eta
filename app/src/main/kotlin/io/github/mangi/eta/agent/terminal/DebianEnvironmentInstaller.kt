@@ -215,16 +215,25 @@ internal class DebianEnvironmentInstaller(
             "${'$'}eta_busybox" chmod 1777 "${'$'}eta_temporary/tmp"
             "${'$'}eta_busybox" rm -f "${'$'}eta_temporary/sdcard"
             "${'$'}eta_busybox" ln -s /storage/emulated/0 "${'$'}eta_temporary/sdcard"
+            # 代理网络下 AAAA 查询会直接失败，glibc 会因此把双栈 getaddrinfo 整体判为失败，
+            # 表现为 apt/curl/git 报 "Temporary failure resolving"，因此关闭 AAAA 查询。
             cat > "${'$'}eta_temporary/etc/resolv.conf" <<'ETA_RESOLV_EOF'
             nameserver 223.5.5.5
             nameserver 119.29.29.29
             nameserver 1.1.1.1
+            options no-aaaa
             ETA_RESOLV_EOF
+            cat > "${'$'}eta_temporary/etc/hosts" <<'ETA_HOSTS_EOF'
+            127.0.0.1 localhost
+            ::1 localhost ip6-localhost ip6-loopback
+            ETA_HOSTS_EOF
             "${'$'}eta_busybox" mkdir -p "${'$'}eta_temporary/etc/apt/apt.conf.d" "${'$'}eta_temporary/usr/local/bin"
             cat > "${'$'}eta_temporary/etc/apt/apt.conf.d/99eta-network" <<'ETA_APT_CONFIG_EOF'
             Acquire::Retries "2";
             Acquire::http::Pipeline-Depth "0";
             Acquire::https::Pipeline-Depth "0";
+            // 代理链路带宽有限，跳过体积很大的 Translation 索引
+            Acquire::Languages "none";
             ETA_APT_CONFIG_EOF
             printf '%s\n' \
               ${shellQuote("deb ${APT_MIRRORS.first().archiveBaseUrl} trixie main")} \

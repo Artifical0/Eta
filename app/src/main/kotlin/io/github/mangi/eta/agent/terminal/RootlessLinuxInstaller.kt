@@ -118,8 +118,11 @@ internal object RootlessLinuxInstaller {
             listOf("proc", "sys", "dev", "dev/shm", "workspace", "storage/emulated/0", "tmp", "usr/local/bin", "root").forEach { File(staging, it).mkdirs() }
             File(staging, "etc/resolv.conf").apply {
                 Files.deleteIfExists(toPath())
-                writeText("nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 1.1.1.1\n")
+                // 代理网络下 AAAA 查询会直接失败，glibc 会让双栈 getaddrinfo 整体失败（musl 不受影响，故仅 Debian 关闭）
+                val ipv4Only = if (distribution == LinuxDistribution.DEBIAN) "options no-aaaa\n" else ""
+                writeText("nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 1.1.1.1\n$ipv4Only")
             }
+            File(staging, "etc/hosts").writeText("127.0.0.1 localhost\n::1 localhost ip6-localhost ip6-loopback\n")
             val helper = when (distribution) {
                 LinuxDistribution.ALPINE -> {
                     File(staging, "etc/apk/repositories").writeText(AlpineEnvironmentInstaller.APK_MIRROR_BASE_URLS.first().let { "$it/v3.24/main\n$it/v3.24/community\n" })
@@ -129,7 +132,9 @@ internal object RootlessLinuxInstaller {
                     val mirror = DebianEnvironmentInstaller.APT_MIRRORS.first()
                     File(staging, "etc/apt/sources.list").writeText("deb ${mirror.archiveBaseUrl} trixie main\ndeb ${mirror.archiveBaseUrl} trixie-updates main\ndeb ${mirror.securityBaseUrl} trixie-security main\n")
                     File(staging, "etc/apt/apt.conf.d").mkdirs()
-                    File(staging, "etc/apt/apt.conf.d/99eta-rootless").writeText("APT::Sandbox::User \"root\";\nAcquire::Retries \"2\";\n")
+                    File(staging, "etc/apt/apt.conf.d/99eta-rootless").writeText(
+                        "APT::Sandbox::User \"root\";\nAcquire::Retries \"2\";\nAcquire::Languages \"none\";\n",
+                    )
                     File(staging, "usr/sbin/policy-rc.d").apply { writeText("#!/bin/sh\nexit 101\n"); setExecutable(true, false) }
                     "eta-apt" to DebianEnvironmentInstaller.aptMirrorScript()
                 }
