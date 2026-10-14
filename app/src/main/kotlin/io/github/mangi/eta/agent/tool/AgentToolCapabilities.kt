@@ -31,7 +31,6 @@ internal data class AgentToolCapabilities(
     val hotspotAvailable: Boolean = true,
     val nfcAvailable: Boolean = true,
     val nightLightAvailable: Boolean = true,
-    val vivo: Boolean = false,
     val virtualDisplayAvailable: Boolean = true,
     val virtualScreenEnabled: Boolean = false,
     val virtualScreenFallbackEnabled: Boolean = false,
@@ -60,7 +59,7 @@ internal data class AgentToolCapabilities(
         val requirement = AgentToolRequirements.find(name) ?: return "UNKNOWN_TOOL"
         if (requirement.rootRequirement == RootRequirement.REQUIRED && !rootAvailable) return "ROOT_REQUIRED"
         if (requirement.lsposedRequirement == LsposedRequirement.REQUIRED && !lsposedAvailable) return "LSPOSED_REQUIRED"
-        if (requirement.colorOs && !colorOs && !(vivo && requirement.vivoAlternative)) return "DEVICE_UNSUPPORTED"
+        if (requirement.colorOs && !colorOs) return "DEVICE_UNSUPPORTED"
         if (requirement.accessibility && !accessibilityAvailable && !accessibilityRecoveryAvailable &&
             !(virtualScreenEnabled && name in VirtualScreenRoutingPolicy.coordinateTools)
         ) {
@@ -126,8 +125,6 @@ internal data class AgentToolCapabilities(
     }
 
     companion object {
-        fun isVivoDevice(): Boolean = Build.MANUFACTURER.equals("vivo", ignoreCase = true)
-
         fun isColorOsDevice(): Boolean = Build.MANUFACTURER.lowercase(Locale.ROOT) in
                 setOf("oppo", "oneplus", "realme")
 
@@ -149,7 +146,6 @@ internal data class AgentToolCapabilities(
                     (context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                         context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED),
                 colorOs = isColorOsDevice(),
-                vivo = isVivoDevice(),
                 virtualDisplayAvailable = Build.VERSION.SDK_INT >= 34,
                 virtualScreenEnabled = settings.virtualScreenEnabled,
                 virtualScreenFallbackEnabled = settings.virtualScreenFallbackEnabled,

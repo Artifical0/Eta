@@ -254,7 +254,7 @@ class AgentModelClientLoopTest {
         assertEquals(listOf("skills_list"), executed)
         assertEquals(listOf(listOf("skills_list"), listOf("skills_list")), publishedTools)
         val result = provider.requests.last().toString()
-        assertTrue(result.contains("INVALID_TOOL_ARGUMENTS"))
+        assertTrue(result.contains("TOOL_NOT_AVAILABLE"))
     }
 
     @Test

@@ -66,18 +66,6 @@ class AgentRuntimeWireTest {
     }
 
     @Test
-    fun vivoAndImportedEtaTurnsShareTheVirtualDisplayOwner() {
-        val handoff = io.github.mangi.eta.hook.vivo.VivoHandoff.create("one", "trace", "request", "session", "操作应用")
-        val config = AgentModelClient.ModelConfig(baseUrl = "https://example.invalid", apiKey = "fixture", model = "fixture", systemPrompt = "")
-        val vivo = AgentRuntimeWire.RunRequest("one", "操作应用", config, emptyList(), handoff = handoff)
-        val id = AgentExternalArchivePayload.conversationId("vivo", "session")
-        val eta = vivo.copy(runId = "two", handoff = AgentRuntimeWire.EntryHandoff("two", AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE, id))
-        assertEquals(id, vivo.virtualScreenOwner)
-        assertEquals(vivo.virtualScreenOwner, eta.virtualScreenOwner)
-        assertEquals(id, eta.copy(runId = "three").virtualScreenOwner)
-    }
-
-    @Test
     fun automaticCompactionSettingSurvivesIpcAndDefaultsForOldRequests() {
         val config = AgentModelClient.ModelConfig(
             baseUrl = "https://example.invalid", apiKey = "fixture", model = "fixture", systemPrompt = "",

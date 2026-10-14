@@ -256,7 +256,6 @@ internal object AgentTaskScheduler {
             "calendar_near",
             "file_changed",
             "shared_content",
-            "vivo_memory_updated"
         ).forEach { type ->
             triggers.put(
                 JSONObject().put("type", type).put("available", false)

@@ -54,6 +54,7 @@ internal class AgentLoop(
     )
 
     private var availableToolNames = emptySet<String>()
+    private var batchValidator = AgentToolCallValidator(JSONArray())
     private val accumulatedReasoning = StringBuilder()
     private val sensitiveToolCallIds = linkedSetOf<String>()
     private var pendingToolImageMessage: JSONObject? = null
@@ -114,6 +115,7 @@ internal class AgentLoop(
             availableToolNames = (0 until roundTools.length()).mapNotNullTo(mutableSetOf()) { index ->
                 roundTools.optJSONObject(index)?.optJSONObject("function")?.optString("name")
             }
+            batchValidator = AgentToolCallValidator(roundTools)
             publishTranscript()
             if (purpose.allowsTools) context.compact()
             val requestMessages = AssistantScreenContextProjection.project(
@@ -496,6 +498,9 @@ internal class AgentLoop(
             )
         }
         if (toolCall.name == AgentBatchToolCatalog.NAME) {
+            batchValidator.validate(toolCall)?.let { problem ->
+                return rejectedToolOutcome(round, toolCall, "INVALID_TOOL_ARGUMENTS", problem)
+            }
             val arguments = JSONObject(toolCall.argumentsJson)
             val calls = AgentBatchToolCatalog.calls(toolCall)
             val sequential = arguments.optString("mode", "auto") == "sequential"
@@ -508,7 +513,7 @@ internal class AgentLoop(
                     call.name == AgentBatchToolCatalog.NAME -> "不能在 batch 中嵌套 batch"
                     !sequential && call.name !in AgentToolBatchPlanner.batchTools ->
                         "auto 模式只支持只读查询；需要执行此工具时请设置 mode=sequential"
-                    else -> unavailableToolMessage(call)
+                    else -> batchValidator.validate(call)
                 }
                 if (validation != null) return rejectedToolOutcome(round, toolCall,
                     "INVALID_TOOL_ARGUMENTS", "calls[$index]: $validation")

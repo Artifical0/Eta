@@ -500,7 +500,7 @@ class AgentBatchToolTest {
         }, provider = provider, restrictedToolNames = setOf("search_apps"))
         assertEquals(0, executed.get())
         assertFalse(provider.requests.first().tools.objects().any { it.getJSONObject("function").getString("name") == "batch" })
-        assertEquals("INVALID_TOOL_ARGUMENTS", provider.toolResult().getString("code"))
+        assertEquals("TOOL_NOT_AVAILABLE", provider.toolResult().getString("code"))
     }
 
     private val loopThread = Thread.currentThread()
