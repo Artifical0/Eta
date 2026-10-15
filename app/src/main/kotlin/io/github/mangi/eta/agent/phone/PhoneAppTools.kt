@@ -33,7 +33,9 @@ internal class PhoneAppTools(
             else PhoneOperation.failure("DEVICE_UNSUPPORTED", "当前设备没有兼容的一方应用接口")
         // 标准 Intent 仍承担显式震动设置；厂商创建接口没有对应参数，不能静默忽略。
         if (tool == "set_alarm" && (arguments.has("vibrate") || !rootAvailable())) return null
-        if (calendar && hasCalendarAccess(tool in PhoneOperation.writes))
+        // 部分 ROM（实测 ColorOS 17）以第三方身份查询日历只会得到空结果，Root 通道才是可用路径；
+        // 没有 Root 时仍回退到应用自身身份。
+        if (calendar && !rootAvailable() && hasCalendarAccess(tool in PhoneOperation.writes))
             return PhoneOperations.execute(context, tool, arguments)
         if (!rootAvailable())
             return PhoneOperation.failure(
