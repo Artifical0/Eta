@@ -108,12 +108,13 @@ internal object RootDisplayCommandMain {
                 wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Eta:virtual-task")
                     .apply { acquire() }
                 // CPU wakefulness alone does not keep the virtual display group interactive.
-                recoveryWakeLock = createRecoveryWakeLock(power, display.display).apply { acquire() }
+                recoveryWakeLock = createRecoveryWakeLock(power, display.display)?.apply { acquire() }
             }
             reply(
                 JSONObject().put("ok", true).put("displayId", id).put("width", width)
                     .put("height", height).put("density", dpi).put("refreshRate", display.display.refreshRate)
                     .put("independentFocus", true)
+                    .put("displayPowerScope", recoveryWakeLock != null)
                     .put("localIme", localIme)
             )
             while (true) {
@@ -385,17 +386,26 @@ internal object RootDisplayCommandMain {
     /** UID 0 only: refuse a shared/unknown group before creating a display-specific wake lock. */
     @SuppressLint("BlockedPrivateApi")
     @Suppress("DEPRECATION")
-    private fun createRecoveryWakeLock(power: PowerManager, display: Display): PowerManager.WakeLock {
-        require(display.displayId > Display.DEFAULT_DISPLAY) { "DISPLAY_POWER_SCOPE_UNAVAILABLE" }
-        val infoClass = Class.forName("android.view.DisplayInfo")
-        val info = infoClass.getDeclaredConstructor().newInstance()
-        require(Display::class.java.getMethod("getDisplayInfo", infoClass).invoke(display, info) == true &&
-            infoClass.getField("displayGroupId").getInt(info) > 0) { "DISPLAY_POWER_SCOPE_UNAVAILABLE" }
-        return PowerManager::class.java.getMethod(
-            "newWakeLock", Int::class.javaPrimitiveType, String::class.java, Int::class.javaPrimitiveType,
-        ).invoke(power, PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-            "Eta:virtual-recovery", display.displayId) as PowerManager.WakeLock
-    }
+    /**
+     * Best effort: the display-scoped wake lock only exists when the platform reports a display
+     * group for the new virtual display. Roms that keep the virtual display in group 0 cannot
+     * provide it, and that must not block creating the virtual screen.
+     */
+    private fun createRecoveryWakeLock(power: PowerManager, display: Display): PowerManager.WakeLock? =
+        runCatching {
+            val infoClass = Class.forName("android.view.DisplayInfo")
+            val info = infoClass.getDeclaredConstructor().newInstance()
+            require(Display::class.java.getMethod("getDisplayInfo", infoClass).invoke(display, info) == true) {
+                "DISPLAY_POWER_SCOPE_UNAVAILABLE"
+            }
+            require(recoveryWakelockScopeAvailable(display.displayId, infoClass.getField("displayGroupId").getInt(info))) {
+                "DISPLAY_POWER_SCOPE_UNAVAILABLE"
+            }
+            PowerManager::class.java.getMethod(
+                "newWakeLock", Int::class.javaPrimitiveType, String::class.java, Int::class.javaPrimitiveType,
+            ).invoke(power, PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "Eta:virtual-recovery", display.displayId) as PowerManager.WakeLock
+        }.getOrNull()
 
     private fun flag(name: String) = DisplayManager::class.java.getField(name).getInt(null)
 
@@ -486,6 +496,10 @@ internal object RootDisplayCommandMain {
 
     private fun failure(code: String) = JSONObject().put("ok", false).put("code", code)
         .put("message", "虚拟屏操作未执行；不会回退到主屏")
+
+    /** A display-scoped wake lock needs a real display group above the default one. */
+    internal fun recoveryWakelockScopeAvailable(displayId: Int, displayGroupId: Int): Boolean =
+        displayId > Display.DEFAULT_DISPLAY && displayGroupId > 0
 
     private fun reply(value: JSONObject) {
         System.out.println(MARKER + value.toString()); System.out.flush()
