@@ -37,6 +37,16 @@ class MainActivity : ComponentActivity() {
     private var speechSettingsRequested by mutableStateOf(false)
     private var terminalRequested by mutableStateOf(false)
 
+    override fun onStart() {
+        super.onStart()
+        io.github.mangi.eta.agent.runtime.EtaMainVisibility.tracker.started(this)
+    }
+
+    override fun onStop() {
+        io.github.mangi.eta.agent.runtime.EtaMainVisibility.tracker.stopped(this)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         var contentReady = false

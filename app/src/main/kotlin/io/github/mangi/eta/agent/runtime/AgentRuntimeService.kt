@@ -1275,6 +1275,12 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun enterFinalState(finalState: AgentOverlayState, keepVisible: Boolean = false) {
         state.value = finalState
 
+        // The conversation already displays the result. Never cover the visible Eta activity
+        // with a duplicate result overlay (also applies to the main-screen execution path).
+        if (EtaMainVisibility.visible) {
+            dismissAndStop()
+            return
+        }
         if (hasExecutedForegroundTool || keepVisible) {
             // Virtual runs never create the ambient overlay. Resolve a manager here at
             // terminal state instead of calling showOverlay(), which would flash the capsule.
