@@ -50,7 +50,9 @@ internal object RootDisplayCommandMain {
                 asmClass.getMethod("getInstance").invoke(null)
             }.onFailure {
                 runCatching {
-                    val created = asmClass.getMethod("create").invoke(null)
+                    val asmClass = Class.forName("com.android.internal.os.ApplicationSharedMemory")
+                    val create = asmClass.getMethod("create")
+                    val created = create.invoke(null)
                     asmClass.getMethod("setInstance", created.javaClass).invoke(null, created)
                 }
             }
