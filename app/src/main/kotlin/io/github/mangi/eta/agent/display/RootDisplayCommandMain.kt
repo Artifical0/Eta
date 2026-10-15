@@ -349,8 +349,15 @@ internal object RootDisplayCommandMain {
                     )
                 }
             }
-        } catch (_: Exception) {
-            reply(failure("ROOT_DISPLAY_UNAVAILABLE"))
+        } catch (error: Throwable) {
+            // 临时诊断：把真实异常透传出去，便于定位 ROOT_DISPLAY_UNAVAILABLE 根因。
+            // 保留原错误码，避免破坏上层路由策略。
+            reply(failure("ROOT_DISPLAY_UNAVAILABLE").apply {
+                put("debug_error", error.javaClass.name)
+                put("debug_message", error.message?.take(300))
+                put("debug_cause", error.cause?.javaClass?.name)
+                put("debug_cause_message", error.cause?.message?.take(300))
+            })
         } finally {
             runCatching { rotationListener?.close() }
             runCatching { display?.release() }
