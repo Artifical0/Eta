@@ -18,6 +18,7 @@ import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.core.safeLogType
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.data.db.AgentTaskRunEntity
+import io.github.mangi.eta.ui.app.AgentRunResultNotification
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
 import io.github.mangi.eta.ui.MainActivity
 import java.util.concurrent.atomic.AtomicBoolean
@@ -140,6 +141,13 @@ internal class AgentTaskJobService : JobService() {
                             result.content.take(1000)
                         )
                         if (status in setOf("completed", "failed")) {
+                            AgentRunResultNotification.show(
+                                context = applicationContext,
+                                ok = result.ok,
+                                content = result.content,
+                                error = result.error,
+                                conversationId = null,
+                            )
                             AgentTaskScheduler.publish(
                                 this@AgentTaskJobService,
                                 if (result.ok) "task_completed" else "task_failed",

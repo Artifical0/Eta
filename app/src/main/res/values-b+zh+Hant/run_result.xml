@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="run_result_channel">任務結果</string>
+    <string name="run_result_title_ok">任務已完成</string>
+    <string name="run_result_title_failed">任務未完成</string>
+    <string name="run_result_empty">沒有可顯示的結果</string>
+</resources>
