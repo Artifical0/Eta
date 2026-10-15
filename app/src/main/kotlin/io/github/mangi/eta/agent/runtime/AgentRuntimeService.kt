@@ -574,6 +574,12 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         mainHandler.post {
             if (activeSession !== session) return@post
             lastCompletedRunContext = completedContext
+            val showVirtualResult = AgentTerminalResultPolicy.showVirtualResult(
+                virtualUiRouted = session.virtualUiRouted.get(),
+                automation = resultArchive?.first == "automation",
+                stopped = result.error == "已停止",
+                paused = result.errorCode == "UI_EXECUTION_PAUSED",
+            )
             activeSession = null
             runCatching {
                 if (result.ok) {
@@ -583,7 +589,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                             status = AgentOverlayStatus.ResultReady,
                             detailText = result.content.trim().ifBlank { state.value.detailText },
                         ),
-                        keepVisible = entrySurfaceGuard?.wasTriggered == true,
+                        keepVisible = entrySurfaceGuard?.wasTriggered == true || showVirtualResult,
                     )
                 } else {
                     enterFinalState(
@@ -598,7 +604,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                             },
                             detailText = result.error.orEmpty(),
                         ),
-                        keepVisible = entrySurfaceGuard?.wasTriggered == true,
+                        keepVisible = entrySurfaceGuard?.wasTriggered == true || showVirtualResult,
                     )
                 }
             }.onFailure { throwable ->
@@ -1266,7 +1272,13 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun enterFinalState(finalState: AgentOverlayState, keepVisible: Boolean = false) {
         state.value = finalState
 
-        if (hasExecutedForegroundTool) {
+        if (hasExecutedForegroundTool || keepVisible) {
+            // Virtual runs never create the ambient overlay. Resolve a manager here at
+            // terminal state instead of calling showOverlay(), which would flash the capsule.
+            if (windowManager == null &&
+                (AgentAccessibilityService.current() != null || Settings.canDrawOverlays(this))) {
+                windowManager = overlayContext().getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            }
             // 撤掉胶囊和边缘光，改显半屏结果卡片，不自动关闭，用户手动关闭
             capsuleExpanded.value = false
             removeAmbientWindows()

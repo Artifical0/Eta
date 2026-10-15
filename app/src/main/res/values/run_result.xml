@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="run_result_channel">Task results</string>
-    <string name="run_result_title_ok">Task finished</string>
-    <string name="run_result_title_failed">Task did not finish</string>
-    <string name="run_result_empty">No result text</string>
-</resources>

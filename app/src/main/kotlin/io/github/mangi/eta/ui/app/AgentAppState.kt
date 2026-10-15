@@ -1655,16 +1655,6 @@ internal class AgentAppState(
                         detail = result.error.takeIf { notice == SystemNoticeCode.RuntimeFailed || notice == SystemNoticeCode.UiPaused },
                     )
                 }
-                // 用户主动停止和虚拟屏暂停不算“跑完”，不弹结果提示。
-                if (notice != SystemNoticeCode.Stopped && notice != SystemNoticeCode.UiPaused) {
-                    AgentRunResultNotification.show(
-                        context = appContext,
-                        ok = result.ok,
-                        content = result.content,
-                        error = result.error,
-                        conversationId = conversationIdForRun(runId),
-                    )
-                }
             }
         }
         setConversationStreaming(runId, false)
