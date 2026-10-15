@@ -43,7 +43,7 @@ internal class VirtualScreenAppRotation(private val display: Display, private va
                     changes[taskId] = orientation
                 }
             } catch (_: Exception) {
-                // 派生事务码可能与本机 AIDL 布局不匹配，忽略无法解析的回调。
+                // Ignore malformed callbacks without terminating the root helper.
             }
             return true
         }
@@ -87,10 +87,20 @@ internal class VirtualScreenAppRotation(private val display: Display, private va
         stubClass.getDeclaredField("TRANSACTION_$name").apply {
             isAccessible = true
         }.getInt(null)
-    } catch (_: NoSuchFieldException) {
-        // Android 15+ 的 Stub 不再生成 TRANSACTION_* 静态字段，按接口方法声明顺序推导事务码。
-        val index = listenerClass.declaredMethods.indexOfFirst { it.name == name }
-        if (index >= 0) IBinder.FIRST_CALL_TRANSACTION + index else -1
+    } catch (_: ReflectiveOperationException) {
+        // Some platform variants omit individual callbacks/transaction fields.
+        // Reflection method order is NOT AIDL transaction order. Resolve the platform's
+        // own name mapping instead; an absent optional callback must remain disabled.
+        try {
+            val transactionName = stubClass.getDeclaredMethod("getDefaultTransactionName", Int::class.javaPrimitiveType).apply {
+                isAccessible = true
+            }
+            (IBinder.FIRST_CALL_TRANSACTION..1024).firstOrNull {
+                transactionName.invoke(null, it) == name
+            } ?: -1
+        } catch (_: ReflectiveOperationException) {
+            -1
+        }
     }
 
     companion object {
