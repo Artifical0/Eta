@@ -43,6 +43,17 @@ internal object RootDisplayCommandMain {
             require(Process.myUid() == 0) { "ROOT_REQUIRED" }
             if (Looper.myLooper() == null) Looper.prepareMainLooper()
             val activityThread = Class.forName("android.app.ActivityThread")
+            // app_process 直接启动的进程没有 Zygote 的 shared memory 初始化；补上，
+            // 否则 systemMain() 内部路径会抛 "ApplicationSharedMemory not initialized"。
+            runCatching {
+                val asmClass = Class.forName("com.android.internal.os.ApplicationSharedMemory")
+                asmClass.getMethod("getInstance").invoke(null)
+            }.onFailure {
+                runCatching {
+                    val created = asmClass.getMethod("create").invoke(null)
+                    asmClass.getMethod("setInstance", created.javaClass).invoke(null, created)
+                }
+            }
             val thread = activityThread.getDeclaredMethod("systemMain").invoke(null)
             val context =
                 activityThread.getDeclaredMethod("getSystemContext").invoke(thread) as Context
