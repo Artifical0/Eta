@@ -95,15 +95,16 @@ internal class VirtualScreenAppRotation(private val display: Display, private va
             val transactionName = stubClass.getDeclaredMethod("getDefaultTransactionName", Int::class.javaPrimitiveType).apply {
                 isAccessible = true
             }
-            (IBinder.FIRST_CALL_TRANSACTION..1024).firstOrNull {
-                transactionName.invoke(null, it) == name
-            } ?: -1
+            resolveOptionalTransaction(name) { transactionName.invoke(null, it) as? String }
         } catch (_: ReflectiveOperationException) {
             -1
         }
     }
 
     companion object {
+        internal fun resolveOptionalTransaction(name: String, transactionName: (Int) -> String?): Int =
+            (IBinder.FIRST_CALL_TRANSACTION..1024).firstOrNull { transactionName(it) == name } ?: -1
+
         fun rotationFor(orientation: Int, naturalLandscape: Boolean, currentRotation: Int): Int = when (orientation) {
             ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE,
             ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE -> if (naturalLandscape) 0 else 1

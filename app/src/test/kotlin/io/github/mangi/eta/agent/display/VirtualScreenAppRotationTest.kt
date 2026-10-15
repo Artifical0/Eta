@@ -6,6 +6,25 @@ import org.junit.Test
 
 class VirtualScreenAppRotationTest {
     @Test
+    fun optionalCallbackUsesPlatformNameMappingNotMethodOrder() {
+        assertEquals(13, VirtualScreenAppRotation.resolveOptionalTransaction("orientation") {
+            when (it) { 1 -> "unrelated"; 13 -> "orientation"; else -> null }
+        })
+    }
+
+    @Test
+    fun missingOptionalCallbackIsDisabled() {
+        assertEquals(-1, VirtualScreenAppRotation.resolveOptionalTransaction("missing") { null })
+    }
+
+    @Test
+    fun callbackLookupIsBounded() {
+        var calls = 0
+        assertEquals(-1, VirtualScreenAppRotation.resolveOptionalTransaction("missing") { calls++; null })
+        assertEquals(1024, calls)
+    }
+
+    @Test
     fun fixedAndReverseOrientationsFollowNaturalPortraitAxes() {
         assertEquals(1, VirtualScreenAppRotation.rotationFor(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, false, 0))
         assertEquals(0, VirtualScreenAppRotation.rotationFor(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, false, 1))
