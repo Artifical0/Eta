@@ -58,9 +58,12 @@ internal object VirtualScreenNotification {
                 }
             // 状态栏胶囊与锁屏流体云由平台的提升常驻通知接管；用户关闭该功能时只是一条普通常驻通知。
             if (Build.VERSION.SDK_INT >= 36) {
-                builder.setRequestPromotedOngoing(true)
-                if (!manager.canPostPromotedNotifications()) {
-                    AndroidAgentLogger.warn("Virtual screen live update disabled by user settings")
+                runCatching { builder.setRequestPromotedOngoing(true) }
+                    .onFailure { AndroidAgentLogger.warn("Virtual screen live update request failed: type=${it.safeLogType()}") }
+                runCatching {
+                    if (!manager.canPostPromotedNotifications()) {
+                        AndroidAgentLogger.warn("Virtual screen live update disabled by user settings")
+                    }
                 }
             }
             manager.notify(sessionId, ID, builder.build())
