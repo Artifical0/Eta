@@ -1460,6 +1460,8 @@
     <string name="virtual_screen_notification_channel">虚拟屏</string>
     <string name="virtual_screen_notification_title">虚拟屏正在运行</string>
     <string name="virtual_screen_notification_content">点击查看并操作虚拟屏当前内容</string>
+    <string name="virtual_screen_notification_open">打开虚拟屏</string>
+    <string name="virtual_screen_notification_preview">悬浮预览</string>
     <string name="conversation_context_capsule">上下文</string>
     <string name="conversation_speed_description">最近一次模型请求：平均每秒生成 %1$s 个输出 token，包含首字等待时间。</string>
     <string name="virtual_screen_home">主页</string>
@@ -1565,7 +1567,7 @@
     <string name="inbox_operation_failed">方案操作未完成，请重试</string>
     <string name="inbox_refinement_conversation">完善沉淀方案</string>
     <string name="virtual_screen_floating_enable">虚拟屏悬浮预览</string>
-    <string name="virtual_screen_floating_summary">Eta 操作虚拟屏时显示实时预览。可拖动、贴边折叠，点击进入虚拟屏；折叠或隐藏时停止预览抓帧。</string>
+    <string name="virtual_screen_floating_summary">允许使用悬浮预览。它不再自动出现在手机屏幕上；需要时从实时通知（流体云）里打开悬浮预览，即可在 Eta 操作虚拟屏时观看。可拖动、贴边折叠，点击进入虚拟屏；折叠或隐藏时停止预览抓帧。</string>
     <string name="virtual_screen_floating_open">打开虚拟屏</string>
     <string name="virtual_screen_floating_dismiss">本次任务隐藏预览</string>
     <string name="chat_interject_hint">输入消息，实时插话调整当前任务…</string>

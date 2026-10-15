@@ -67,6 +67,7 @@ internal class VirtualScreenFloatingPreviewHost(private val context: Context) : 
     private var collapsed = false
     private var edge = FloatingPreviewPlacement.Edge.RIGHT
     private var run: String? = null
+    private var requestedSession: String? = null
     private var dismissedRun: String? = null
     private var lastFrame = 0L
     private var generation = 0L
@@ -83,8 +84,12 @@ internal class VirtualScreenFloatingPreviewHost(private val context: Context) : 
             addAction(Intent.ACTION_USER_PRESENT); addAction(Intent.ACTION_CONFIGURATION_CHANGED)
         }, Context.RECEIVER_NOT_EXPORTED)
         scope.launch {
-            combine(SettingsDataStore.settingsFlow(), VirtualScreenSession.state) { options, display -> options to display }
-                .collect { (options, display) -> settings = options; state = display; render() }
+            combine(
+                SettingsDataStore.settingsFlow(),
+                VirtualScreenSession.state,
+                VirtualScreenPreviewRequest.session,
+            ) { options, display, requested -> Triple(options, display, requested) }
+                .collect { (options, display, requested) -> settings = options; state = display; requestedSession = requested; render() }
         }
     }
 
@@ -94,10 +99,21 @@ internal class VirtualScreenFloatingPreviewHost(private val context: Context) : 
             position = null
             folding?.cancel()
         }
-        val visible = settings.virtualScreenEnabled && settings.virtualScreenFloatingPreviewEnabled &&
-            state.isAgentControlling && run != null && dismissedRun != run && !state.fullViewerVisible &&
-            Settings.canDrawOverlays(context) && context.getSystemService(PowerManager::class.java).isInteractive &&
-            !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        val sessionId = state.display?.sessionId
+        if (sessionId == null || !state.isAgentControlling) VirtualScreenPreviewRequest.clear()
+        val visible = VirtualScreenFloatingPreviewPolicy.visible(
+            virtualScreenEnabled = settings.virtualScreenEnabled,
+            previewEnabled = settings.virtualScreenFloatingPreviewEnabled,
+            canDrawOverlays = Settings.canDrawOverlays(context),
+            interactive = context.getSystemService(PowerManager::class.java).isInteractive,
+            keyguardLocked = context.getSystemService(KeyguardManager::class.java).isKeyguardLocked,
+            agentControlling = state.isAgentControlling,
+            runId = run,
+            dismissedRun = dismissedRun,
+            fullViewerVisible = state.fullViewerVisible,
+            sessionId = sessionId,
+            requestedSessionId = requestedSession,
+        )
         if (!visible) { removeWindow(); return }
         if (root == null) addWindow()
         if (root == null) return

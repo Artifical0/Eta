@@ -1482,6 +1482,8 @@
     <string name="virtual_screen_notification_channel">Virtual screen</string>
     <string name="virtual_screen_notification_title">Virtual screen is active</string>
     <string name="virtual_screen_notification_content">Tap to view and control the current screen</string>
+    <string name="virtual_screen_notification_open">Open virtual screen</string>
+    <string name="virtual_screen_notification_preview">Floating preview</string>
     <string name="conversation_context_capsule">Context</string>
     <string name="conversation_speed_description">Last model request: %1$s output tokens per second, including time to first token.</string>
     <string name="virtual_screen_home">Home</string>
@@ -1587,7 +1589,7 @@
     <string name="inbox_operation_failed">Could not update this proposal. Try again.</string>
     <string name="inbox_refinement_conversation">Refine learning proposal</string>
     <string name="virtual_screen_floating_enable">Floating preview</string>
-    <string name="virtual_screen_floating_summary">Show a live preview while Eta uses the virtual screen. Drag to move, bring to an edge to fold, or tap to open. Captures stop when folded or hidden.</string>
+    <string name="virtual_screen_floating_summary">Allow the floating preview. It no longer appears on the phone screen by itself; open it from the live entry to watch the virtual screen while Eta works. Drag to move, bring to an edge to fold, or tap to open. Captures stop when folded or hidden.</string>
     <string name="virtual_screen_floating_open">Open virtual screen</string>
     <string name="virtual_screen_floating_dismiss">Hide preview for this task</string>
     <string name="chat_interject_hint">Add a message to redirect the current task…</string>
