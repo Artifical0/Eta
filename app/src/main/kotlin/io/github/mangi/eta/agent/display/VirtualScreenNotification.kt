@@ -22,7 +22,7 @@ internal object VirtualScreenNotification {
     private const val CHANNEL = "eta_virtual_screen"
     private const val ID = 1110
 
-    fun show(context: Context, sessionId: String) {
+    fun show(context: Context, sessionId: String, previewEnabled: Boolean) {
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED) return
         runCatching {
@@ -51,8 +51,11 @@ internal object VirtualScreenNotification {
                 .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
                 .addAction(Notification.Action.Builder(null,
                     context.getString(R.string.virtual_screen_notification_open), open).build())
-                .addAction(Notification.Action.Builder(null,
-                    context.getString(R.string.virtual_screen_notification_preview), preview).build())
+                .apply {
+                    // 悬浮预览关闭时不再提供无法生效的按钮。
+                    if (previewEnabled) addAction(Notification.Action.Builder(null,
+                        context.getString(R.string.virtual_screen_notification_preview), preview).build())
+                }
             // 状态栏胶囊与锁屏流体云由平台的提升常驻通知接管；用户关闭该功能时只是一条普通常驻通知。
             if (Build.VERSION.SDK_INT >= 36) {
                 builder.setRequestPromotedOngoing(true)

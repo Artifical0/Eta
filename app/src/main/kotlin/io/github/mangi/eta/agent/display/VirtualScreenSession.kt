@@ -258,7 +258,7 @@ internal object VirtualScreenSession {
                     taskPhase = if (runId == null) VirtualScreenTaskPhase.IDLE else VirtualScreenTaskPhase.RUNNING,
                     activeRunId = runId,
                 )
-                VirtualScreenNotification.show(context, current.id)
+                VirtualScreenNotification.show(context, current.id, settings.virtualScreenFloatingPreviewEnabled)
                 if (current.closed.get()) {
                     viewerState.update { if (it.display?.sessionId == current.id) VirtualScreenViewerState() else it }
                     VirtualScreenNotification.cancel(context, current.id)
