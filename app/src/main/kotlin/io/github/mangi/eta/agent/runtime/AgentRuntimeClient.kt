@@ -122,7 +122,7 @@ internal class AgentRuntimeClient(
         }
     }
 
-    fun steerRun(runId: String, text: String): Boolean {
+    fun steerRun(runId: String, text: String, queued: Boolean = false): Boolean {
         val payload = runCatching { AgentRuntimeWire.steerBundle(runId, text) }.getOrNull() ?: return false
         val response = CountDownLatch(1)
         val accepted = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -137,7 +137,7 @@ internal class AgentRuntimeClient(
         })
         return withRuntimeMessenger(false) { service ->
             service.send(Message.obtain(null, AgentRuntimeWire.MSG_STEER_RUN).apply {
-                data = payload
+                data = payload.apply { putBoolean("queued", queued) }
                 replyTo = receiver
             })
             response.await(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS) && accepted.get()

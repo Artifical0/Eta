@@ -13,6 +13,35 @@ import org.junit.Test
 
 class AgentRunControllerTest {
     @Test
+    fun queuedMessagesDoNotInterruptModelOrToolBatch() {
+        val controller = AgentRunController()
+        val cancellations = AtomicInteger()
+        controller.registerModelRequest(true) { cancellations.incrementAndGet() }
+        assertTrue(controller.enqueue("first"))
+        assertTrue(controller.enqueue("second"))
+        controller.registerModelRequest(true) { cancellations.incrementAndGet() }
+        assertEquals(0, cancellations.get())
+        controller.throwIfModelInterrupted()
+        assertTrue(controller.admitTool())
+        assertFalse(controller.hasPendingSteering)
+        assertEquals("first", controller.pollSteeringMessage())
+        assertEquals("second", controller.pollSteeringOrSeal())
+        assertNull(controller.pollSteeringOrSeal())
+        assertFalse(controller.enqueue("too late"))
+    }
+
+    @Test
+    fun cancelDropsQueueAndImmediateInterjectionKeepsPriority() {
+        val controller = AgentRunController()
+        assertTrue(controller.enqueue("queued"))
+        assertTrue(controller.steer("urgent"))
+        assertEquals("urgent", controller.pollSteeringMessage())
+        controller.cancel()
+        assertNull(controller.pollSteeringMessage())
+        assertFalse(controller.enqueue("after cancel"))
+    }
+
+    @Test
     fun interjectionCancelsOnlyActiveModelRequestAndLateRegistrationObservesPendingMessage() {
         val controller = AgentRunController()
         val toolCancellations = AtomicInteger()

@@ -106,6 +106,14 @@ internal class AgentRuntimeSession(
             }
         }
 
+    fun <T : AgentEvent> enqueue(text: String, eventFactory: () -> T): T? = lock.withLock {
+        if (state != State.RUNNING || operation != AgentRuntimeWire.OP_CHAT || !controller.enqueue(text)) return null
+        eventFactory().also { event ->
+            recordForReplay(event)
+            subscribers.forEach { it.eventSink(event) }
+        }
+    }
+
     private fun recordForReplay(event: AgentEvent) {
         val projected = event.recoveryProjection() ?: return
         if (projected !is AgentEvent.AssistantBlockDelta) {

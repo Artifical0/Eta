@@ -20,6 +20,7 @@ internal class AgentRunController {
     private val lock = ReentrantLock()
     private val pauseCondition = lock.newCondition()
     private val steeringMessages = ArrayDeque<String>()
+    private val queuedMessages = ArrayDeque<String>()
     private var acceptingSteering = true
     @Volatile
     private var paused = false
@@ -29,6 +30,7 @@ internal class AgentRunController {
             cancelled = true
             acceptingSteering = false
             steeringMessages.clear()
+            queuedMessages.clear()
             paused = false
             pauseCondition.signalAll()
         }
@@ -50,9 +52,16 @@ internal class AgentRunController {
         return true
     }
 
+    /** Queue for the next planning boundary without interrupting requests or active tools. */
+    fun enqueue(text: String): Boolean = lock.withLock {
+        if (cancelled || !acceptingSteering || text.isBlank()) return false
+        queuedMessages.addLast(text.trim())
+        true
+    }
+
     /** 默认逐条消费，避免后来的补充指令越过前一条的模型回合。 */
     fun pollSteeringMessage(): String? =
-        lock.withLock { steeringMessages.pollFirst() }
+        lock.withLock { steeringMessages.pollFirst() ?: queuedMessages.pollFirst() }
 
     /**
      * 自然结束前原子地消费最后一条 steering；若队列为空则永久关闭本 run 的接收入口。
@@ -60,7 +69,7 @@ internal class AgentRunController {
      */
     fun pollSteeringOrSeal(): String? =
         lock.withLock {
-            steeringMessages.pollFirst()?.let { return it }
+            (steeringMessages.pollFirst() ?: queuedMessages.pollFirst())?.let { return it }
             acceptingSteering = false
             null
         }

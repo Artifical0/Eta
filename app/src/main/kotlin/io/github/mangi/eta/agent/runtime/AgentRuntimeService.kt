@@ -267,7 +267,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     val runId = AgentRuntimeWire.runIdFromBundle(msg.data)
                     val text = msg.data.getString("supplement_text").orEmpty()
                     val valid = runCatching { AgentRuntimeWire.steerBundle(runId, text) }.isSuccess
-                    val accepted = valid && requestSupplement(text, expectedRunId = runId)
+                    val accepted = valid && if (msg.data.getBoolean("queued")) {
+                        val current = activeSession?.takeIf { it.runId == runId && pendingStartRequest == null }
+                        current?.enqueue(text) { recordSupplementEvent(text) } != null
+                    } else requestSupplement(text, expectedRunId = runId)
                     runCatching {
                         msg.replyTo?.send(Message.obtain(null, AgentRuntimeWire.MSG_STEER_RESPONSE).apply {
                             data = AgentRuntimeWire.ackBundle(runId).apply { putBoolean("accepted", accepted) }

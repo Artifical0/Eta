@@ -277,7 +277,7 @@ internal fun AgentChatInputBar(
                                 character != null && isStreaming ->
                                     stringResource(R.string.chat_character_typing, character.characterName)
                                 character != null -> stringResource(R.string.chat_character_input_hint, character.characterName)
-                                isStreaming -> stringResource(R.string.chat_interject_hint)
+                                isStreaming -> stringResource(R.string.chat_queue_hint)
                                 else -> stringResource(R.string.chat_input_hint)
                             },
                             style = inputTextStyle,
@@ -422,7 +422,7 @@ internal fun AgentChatInputBar(
                                         },
                                         contentDescription = when {
                                             streaming -> stringResource(R.string.chat_stop)
-                                            canInterject -> stringResource(R.string.overlay_supplement)
+                                            canInterject -> stringResource(R.string.chat_queue_send)
                                             isEditingMessage && preserveFollowingMessages -> stringResource(R.string.chat_save_message)
                                             else -> stringResource(R.string.chat_send)
                                         },

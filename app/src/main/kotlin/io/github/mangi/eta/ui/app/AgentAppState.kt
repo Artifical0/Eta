@@ -84,6 +84,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal class AgentAppState(
@@ -98,6 +99,7 @@ internal class AgentAppState(
     private val runEventFlushJobs = mutableMapOf<String, Job>()
     private var currentRunId: String? = null
     private var currentRunJob: Job? = null
+    private val queuedSendMutex = kotlinx.coroutines.sync.Mutex()
     private val persistenceLock = Any()
     private var persistenceJob: Job? = null
     // 导入期间暂停保存：旧状态的增量保存会删除刚导入的会话；导入成功后整体重载，失败时数据库已回滚。
@@ -849,7 +851,9 @@ internal class AgentAppState(
                 return
             }
             scope.launch(Dispatchers.IO) {
-                val accepted = AgentRuntimeClient(appContext, AndroidAgentLogger).steerRun(runId, prompt)
+                val accepted = queuedSendMutex.withLock {
+                    AgentRuntimeClient(appContext, AndroidAgentLogger).steerRun(runId, prompt, queued = true)
+                }
                 if (!accepted) withContext(Dispatchers.Main) {
                     // The task may finish while submitting. Keep the draft instead of starting another run.
                     restoreInterjectionDraft(conversationId, prompt)
