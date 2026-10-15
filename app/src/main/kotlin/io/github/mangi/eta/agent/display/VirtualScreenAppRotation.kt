@@ -35,11 +35,15 @@ internal class VirtualScreenAppRotation(private val display: Display, private va
             if (code !in IBinder.FIRST_CALL_TRANSACTION..IBinder.LAST_CALL_TRANSACTION) return super.onTransact(code, data, reply, flags)
             if (getCallingUid() !in setOf(0, 1000)) return false
             data.enforceInterface("android.app.ITaskStackListener")
-            if (code == activityChanged || code == taskChanged) {
-                val taskId = data.readInt()
-                val orientation = data.readInt()
-                if (changes.size > 128) changes.clear()
-                changes[taskId] = orientation
+            try {
+                if (code == activityChanged || code == taskChanged) {
+                    val taskId = data.readInt()
+                    val orientation = data.readInt()
+                    if (changes.size > 128) changes.clear()
+                    changes[taskId] = orientation
+                }
+            } catch (_: Exception) {
+                // 派生事务码可能与本机 AIDL 布局不匹配，忽略无法解析的回调。
             }
             return true
         }
@@ -79,9 +83,15 @@ internal class VirtualScreenAppRotation(private val display: Display, private va
         changes.clear()
     }
 
-    private fun transaction(name: String): Int = stubClass.getDeclaredField("TRANSACTION_$name").apply {
-        isAccessible = true
-    }.getInt(null)
+    private fun transaction(name: String): Int = try {
+        stubClass.getDeclaredField("TRANSACTION_$name").apply {
+            isAccessible = true
+        }.getInt(null)
+    } catch (_: NoSuchFieldException) {
+        // Android 15+ 的 Stub 不再生成 TRANSACTION_* 静态字段，按接口方法声明顺序推导事务码。
+        val index = listenerClass.declaredMethods.indexOfFirst { it.name == name }
+        if (index >= 0) IBinder.FIRST_CALL_TRANSACTION + index else -1
+    }
 
     companion object {
         fun rotationFor(orientation: Int, naturalLandscape: Boolean, currentRotation: Int): Int = when (orientation) {
