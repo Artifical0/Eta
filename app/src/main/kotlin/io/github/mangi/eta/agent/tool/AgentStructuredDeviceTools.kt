@@ -54,6 +54,9 @@ internal class AgentStructuredDeviceTools(
     }
     private val personalSearch by lazy { IndexedPersonalSearch(indexedPersonalContext) }
     private val phoneApps = PhoneAppTools(context, root, rootAvailable, colorOs)
+
+    /** 只走一方应用接口；返回 null 表示本机只能用系统界面。 */
+    fun nativePhoneTool(tool: String, args: JSONObject): JSONObject? = phoneApps.execute(tool, args)
     private val displaySound =
         DisplaySoundControls(context) { root.execute(it, maxOutputBytes = 32 * 1024) }
     private val systemStates =

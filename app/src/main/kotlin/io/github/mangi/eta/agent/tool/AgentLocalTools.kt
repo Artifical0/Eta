@@ -128,7 +128,8 @@ internal class AgentLocalTools(
     private var fallbackDeclined: MainScreenFallbackDecision? = null
     private var primaryApprovalFromAppConflict = false
     private val virtualUiTools by lazy { VirtualScreenUiTools(context, virtualScreenOwner, closed::get,
-        { args -> textResult(launchApp(args)) }, { args -> textResult(openUri(args)) }, browserRunId) }
+        { args -> textResult(launchApp(args)) }, { args -> textResult(openUri(args)) }, browserRunId,
+        { name, args -> structuredDeviceTools.nativePhoneTool(name, args) }) }
     private val deviceController = RootShellDeviceController(logger, screenshotExcludedPackages, rootAvailable)
     private val rootCommandExecutor = BoundedRootCommandExecutor(logger, rootAvailable = rootAvailable)
     private val structuredDeviceTools = AgentStructuredDeviceTools(

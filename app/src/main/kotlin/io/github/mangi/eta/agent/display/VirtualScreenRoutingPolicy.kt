@@ -53,7 +53,9 @@ internal class VirtualScreenRoutingPolicy(initiallyRouted: Boolean = false) {
             "set_timer",
             "browser_use",
         )
-        val unavailableTools = setOf("open_system_panel", "set_alarm", "set_timer", "browser_use")
+        val unavailableTools = setOf("open_system_panel", "browser_use")
+        /** 有原生一方接口时可在虚拟屏运行；只有退回系统界面才必须用主屏。 */
+        val nativeClockTools = setOf("set_alarm", "set_timer")
         val coordinateTools = setOf(
             "observe_screen",
             "tap",

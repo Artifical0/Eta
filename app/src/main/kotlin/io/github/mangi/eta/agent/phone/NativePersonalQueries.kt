@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.phone
 
+import android.database.Cursor
 import android.net.Uri
 import io.github.mangi.eta.agent.context.PersonalContextTimeUnit
 import java.time.OffsetDateTime
@@ -19,6 +20,8 @@ internal class NativePersonalQueries(
         val time: String,
         val millis: Boolean,
         val where: String? = null,
+        /** 首个来源在部分 ROM 上不可用时按顺序尝试；字段与检索列各自独立。 */
+        val fallbacks: List<Source> = emptyList(),
     )
 
     fun execute(tool: String, args: JSONObject): JSONObject {
@@ -31,17 +34,6 @@ internal class NativePersonalQueries(
         val offset = PhoneOperation.integer(args, "offset", 0, 10000, 0).toInt()
         val sort = PhoneOperation.text(args, "sort", false, 10) ?: "newest"
         if (sort !in setOf("newest", "oldest")) PhoneOperation.error("INVALID_ARGUMENT", "sort 无效")
-        val clauses = mutableListOf<String>()
-        val values = mutableListOf<String>()
-        source.where?.let(clauses::add)
-        query?.takeIf(String::isNotBlank)?.let {
-            val keyword = "%${it.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")}%"
-            clauses +=
-                source.search.joinToString(" OR ", "(", ")") { name ->
-                    values += keyword
-                    "$name LIKE ? ESCAPE '\\'"
-                }
-        }
         val start =
             PhoneOperation.text(args, "start_time", false, 64)?.let {
                 OffsetDateTime.parse(it).toInstant()
@@ -54,34 +46,24 @@ internal class NativePersonalQueries(
             PhoneOperation.error("INVALID_ARGUMENT", "结束时间必须晚于开始")
         if (source.time.isBlank() && (start != null || end != null))
             PhoneOperation.error("TIME_FILTER_UNSUPPORTED", "此来源没有可靠的时间字段")
-        val bounds =
-            (if (source.millis) PersonalContextTimeUnit.MILLISECONDS
-                else PersonalContextTimeUnit.SECONDS)
-                .toBounds(start, end)
-        bounds.startInclusive?.let {
-            clauses += "${source.time} >= ?"
-            values += it.toString()
+        var current: Source? = null
+        var cursor: Cursor? = null
+        for (candidate in listOf(source) + source.fallbacks) {
+            val attempt = runCatching { querySource(candidate, query, sort, start, end) }
+            val result = attempt.getOrNull()
+            if (result != null) {
+                current = candidate
+                cursor = result
+                break
+            }
         }
-        bounds.endExclusive?.let {
-            clauses += "${source.time} < ?"
-            values += it.toString()
-        }
-        val base = Uri.parse(source.uri)
-        val uri = base.buildUpon().authority("$userId@${base.authority}").build()
-        val order = source.order + if (sort == "oldest") " ASC" else " DESC"
-        val cursor =
-            resolver.query(
-                uri,
-                source.columns.toTypedArray(),
-                clauses.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
-                values.toTypedArray(),
-                order,
-            ) ?: PhoneOperation.error("PERSONAL_DATA_UNAVAILABLE", "个人数据源没有返回可读取结果")
+        val rows = cursor ?: PhoneOperation.error("PERSONAL_DATA_UNAVAILABLE", "个人数据源没有返回可读取结果")
+        val active = current ?: PhoneOperation.error("PERSONAL_DATA_UNAVAILABLE", "个人数据源没有返回可读取结果")
         val items = JSONArray()
         var more = false
         var truncated = false
         var budget = 40000
-        cursor.use { c ->
+        rows.use { c ->
             if (offset > 0) c.moveToPosition(offset - 1)
             while (c.moveToNext()) {
                 if (items.length() >= limit) {
@@ -89,7 +71,7 @@ internal class NativePersonalQueries(
                     break
                 }
                 val row = JSONObject()
-                source.columns.forEach { name ->
+                active.columns.forEach { name ->
                     val index = c.getColumnIndex(name)
                     val raw = if (index < 0 || c.isNull(index)) null else c.getString(index)
                     if (raw != null && raw.length > 1500) truncated = true
@@ -123,22 +105,68 @@ internal class NativePersonalQueries(
             )
     }
 
+    private fun querySource(
+        source: Source,
+        query: String?,
+        sort: String,
+        start: java.time.Instant?,
+        end: java.time.Instant?,
+    ): Cursor? {
+        val clauses = mutableListOf<String>()
+        val values = mutableListOf<String>()
+        source.where?.let(clauses::add)
+        query?.takeIf(String::isNotBlank)?.let { raw ->
+            val keyword = "%${raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")}%"
+            clauses +=
+                source.search.joinToString(" OR ", "(", ")") { name ->
+                    values += keyword
+                    "$name LIKE ? ESCAPE '\\'"
+                }
+        }
+        val bounds =
+            (if (source.millis) PersonalContextTimeUnit.MILLISECONDS
+                else PersonalContextTimeUnit.SECONDS)
+                .toBounds(start, end)
+        bounds.startInclusive?.let {
+            clauses += "${source.time} >= ?"
+            values += it.toString()
+        }
+        bounds.endExclusive?.let {
+            clauses += "${source.time} < ?"
+            values += it.toString()
+        }
+        val base = Uri.parse(source.uri)
+        val uri = base.buildUpon().authority("$userId@${base.authority}").build()
+        val order = source.order + if (sort == "oldest") " ASC" else " DESC"
+        return resolver.query(
+            uri,
+            source.columns.toTypedArray(),
+            clauses.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
+            values.toTypedArray(),
+            order,
+        )
+    }
+
     private fun parseTime(value: String) = try { OffsetDateTime.parse(value).toInstant() } catch (_: java.time.DateTimeException) {
         PhoneOperation.error("INVALID_ARGUMENT", "时间必须是带偏移的 ISO 8601 格式")
     }
 
     fun probe(tool: String): Boolean {
         val s = sources.getValue(tool)
-        val base = Uri.parse(s.uri)
-        return resolver
-            .query(
-                base.buildUpon().authority("$userId@${base.authority}").build(),
-                s.columns.toTypedArray(),
-                "0",
-                null,
-                null,
-            )
-            ?.use { true } ?: false
+        return (listOf(s) + s.fallbacks).any { candidate ->
+            val base = Uri.parse(candidate.uri)
+            runCatching {
+                resolver
+                    .query(
+                        base.buildUpon().authority("$userId@${base.authority}").build(),
+                        candidate.columns.toTypedArray(),
+                        "0",
+                        null,
+                        null,
+                    )
+                    ?.use { true } ?: false
+            }.getOrDefault(false)
+        }
     }
 
     companion object {
@@ -227,6 +255,17 @@ internal class NativePersonalQueries(
                         "lastmod",
                         "lastmod",
                         true,
+                        // 部分 ROM 的下载提供者缺少 mime_type 等列并直接报错，回退到媒体库下载集合。
+                        fallbacks = listOf(
+                            Source(
+                                "content://media/external/downloads",
+                                columns("_id,_display_name,mime_type,size,date_modified,relative_path"),
+                                columns("_display_name,relative_path"),
+                                "date_modified",
+                                "date_modified",
+                                true,
+                            )
+                        ),
                     ),
                 "search_notes" to
                     Source(

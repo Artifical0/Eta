@@ -16,7 +16,7 @@ internal class AgentPrivateDatabaseTools(
 ) {
     fun execute(name: String, args: JSONObject): AgentModelClient.ToolResult? = when (name) {
         "list_alarms" -> sensitive(readDatabase(CLOCK_DATABASE, "CLOCK_DATA_UNAVAILABLE") { listAlarms(it, args) })
-        "list_active_timers" -> sensitive(readDatabase(CLOCK_DATABASE, "CLOCK_DATA_UNAVAILABLE") { listTimers(it, args) })
+        "list_active_timers" -> sensitive(timersUnsupported(readDatabase(CLOCK_DATABASE, "CLOCK_DATA_UNAVAILABLE") { listTimers(it, args) }))
         "search_clipboard_history" -> sensitive(readDatabase(CLIPBOARD_DATABASE, "CLIPBOARD_HISTORY_UNAVAILABLE") { searchClipboard(it, args) })
         "get_health_summary" -> sensitive(readDatabase(HEALTH_DATABASE, "HEALTH_DATA_UNAVAILABLE") { healthSummary(it, args) })
         else -> null
@@ -133,7 +133,8 @@ internal class AgentPrivateDatabaseTools(
             val userId = context.dataDir.parentFile?.name?.toIntOrNull()
                 ?: return@synchronized error(unavailableCode, "无法确定当前 Android 用户")
             val sourcePath = source.path.replace("{user}", userId.toString())
-            val snapshot = createSnapshot(sourcePath, source.maxBytes)
+            val snapshot = (listOf(sourcePath) + source.alternates.map { it.replace("{user}", userId.toString()) })
+                .firstNotNullOfOrNull { createSnapshot(it, source.maxBytes) }
                 ?: return@synchronized error(unavailableCode, source.unavailableMessage)
             try {
                 runCatching {
@@ -248,9 +249,21 @@ internal class AgentPrivateDatabaseTools(
     private fun String.escapeLike(): String = replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
     private fun error(code: String, message: String): String = JSONObject().put("ok", false).put("code", code).put("message", message).toString()
+
+    /** 计时器没有一方应用接口；数据库缺失说明本机不支持，而不是临时不可用。 */
+    private fun timersUnsupported(content: String): String =
+        if (content.contains("\"code\":\"CLOCK_DATA_UNAVAILABLE\""))
+            error("CLOCK_TIMERS_UNSUPPORTED", "本机时钟没有提供计时器查询接口，请在时钟应用内查看计时器")
+        else content
     private fun sensitive(content: String) = AgentModelClient.ToolResult(content = content, sensitive = true)
 
-    private data class DatabaseSource(val path: String, val maxBytes: Long, val unavailableMessage: String)
+    private data class DatabaseSource(
+        val path: String,
+        val maxBytes: Long,
+        val unavailableMessage: String,
+        /** 同一数据在不同 ROM 上可能落在设备加密或凭据加密目录，按顺序尝试。 */
+        val alternates: List<String> = emptyList(),
+    )
 
     private companion object {
         val snapshotLock = Any()
@@ -261,6 +274,10 @@ internal class AgentPrivateDatabaseTools(
             "/data/user_de/{user}/com.coloros.alarmclock/databases/alarms.db",
             32L * 1024 * 1024,
             "ColorOS 时钟数据暂时不可访问",
+            alternates = listOf(
+                "/data/user/{user}/com.coloros.alarmclock/databases/alarms.db",
+                "/data/data/com.coloros.alarmclock/databases/alarms.db",
+            ),
         )
         val CLIPBOARD_DATABASE = DatabaseSource(
             "/data/user/{user}/com.sohu.inputmethod.sogouoem/databases/clipboard_db",

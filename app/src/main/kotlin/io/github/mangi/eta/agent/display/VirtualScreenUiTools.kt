@@ -24,6 +24,8 @@ internal class VirtualScreenUiTools(
     private val launchApp: (JSONObject) -> AgentModelClient.ToolResult,
     private val openUri: (JSONObject) -> AgentModelClient.ToolResult,
     private val runId: String = owner,
+    /** 一方时钟接口的结果；为空表示本机只能用系统界面，因此虚拟屏内不可用。 */
+    private val nativeClockTool: ((String, JSONObject) -> JSONObject?)? = null,
 ) {
     private var snapshot: AgentAccessibilityService.NodeSnapshot? = null
     private var observedSession: String? = null
@@ -41,7 +43,13 @@ internal class VirtualScreenUiTools(
 
     fun execute(name: String, args: JSONObject): AgentModelClient.ToolResult = try {
         val before = snapshot
-        val result = if (name in VirtualScreenRoutingPolicy.unavailableTools) {
+        val result = if (name in VirtualScreenRoutingPolicy.nativeClockTools) {
+            nativeClockTool?.invoke(name, args)?.let { AgentModelClient.ToolResult(it.toString(), sensitive = true) }
+                ?: failure(
+                    "VIRTUAL_ACTION_UNSUPPORTED",
+                    "此 UI 工具不能在虚拟屏执行；请使用虚拟屏内的应用，不会操作主屏。"
+                )
+        } else if (name in VirtualScreenRoutingPolicy.unavailableTools) {
             failure(
                 "VIRTUAL_ACTION_UNSUPPORTED",
                 "此 UI 工具不能在虚拟屏执行；请使用虚拟屏内的应用，不会操作主屏。"
