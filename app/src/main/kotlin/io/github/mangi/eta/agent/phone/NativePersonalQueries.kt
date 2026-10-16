@@ -263,7 +263,8 @@ internal class NativePersonalQueries(
                                 columns("_display_name,relative_path"),
                                 "date_modified",
                                 "date_modified",
-                                true,
+                                // MediaStore 的 date_modified 单位是秒。
+                                false,
                             )
                         ),
                     ),

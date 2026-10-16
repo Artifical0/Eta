@@ -89,7 +89,11 @@ internal class VirtualScreenFloatingPreviewHost(private val context: Context) : 
                 VirtualScreenSession.state,
                 VirtualScreenPreviewRequest.session,
             ) { options, display, requested -> Triple(options, display, requested) }
-                .collect { (options, display, requested) -> settings = options; state = display; requestedSession = requested; render() }
+                .collect { (options, display, requested) ->
+                    // 通知里再次点「悬浮预览」是新的显式请求，撤销本任务之前的关闭。
+                    if (requested != null && requested != requestedSession) dismissedRun = null
+                    settings = options; state = display; requestedSession = requested; render()
+                }
         }
     }
 
@@ -144,7 +148,12 @@ internal class VirtualScreenFloatingPreviewHost(private val context: Context) : 
         header.addView(TextView(windowContext).apply {
             text = "×"; textSize = 20f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
             contentDescription = context.getString(R.string.virtual_screen_floating_dismiss)
-            setOnClickListener { dismissedRun = run; removeWindow() }
+            setOnClickListener {
+                dismissedRun = run
+                // 清掉请求，下次点通知按钮时请求值会重新变化，才能把预览叫回来。
+                VirtualScreenPreviewRequest.clear(state.display?.sessionId)
+                removeWindow()
+            }
         }, LinearLayout.LayoutParams(dp(32), dp(30)))
         column.addView(header)
         val image = VirtualScreenSurfaceView(windowContext).apply { touchEnabled = false }
