@@ -1448,12 +1448,13 @@
     <string name="automation_interrupted">已中断，未重放</string>
     <string name="automation_config_required">需要配置模型</string>
     <string name="virtual_screen_fallback_enable">允许请求回退主屏</string>
-    <string name="virtual_screen_fallback_summary">虚拟屏无法执行时暂停任务，并在通知中请求允许。只有点击「允许本次任务」后才会改用主屏，并重新观察。默认关闭。</string>
+    <string name="virtual_screen_fallback_summary">虚拟屏无法执行时暂停任务，并弹窗请求允许（不在 Eta 内时以悬浮窗弹出，同时保留通知）。只有点击「允许本次任务」后才会改用主屏，并重新观察。默认关闭。</string>
     <string name="virtual_screen_fallback_channel">主屏回退授权</string>
     <string name="virtual_screen_fallback_notification_title">需要允许回退主屏</string>
     <string name="virtual_screen_fallback_notification_body">%1$s：%2$s。是否允许本次任务改用主屏？任务已暂停，点击允许后会重新观察主屏再执行。</string>
     <string name="virtual_screen_fallback_allow">允许本次任务</string>
     <string name="virtual_screen_fallback_deny">继续使用虚拟屏</string>
+    <string name="virtual_screen_fallback_overlay_hint">点击弹窗外可收起，稍后在通知中继续选择</string>
     <string name="virtual_screen_fallback_reason_app">此应用不能在虚拟屏运行</string>
     <string name="virtual_screen_fallback_reason_device">设备暂时无法提供虚拟屏</string>
     <string name="virtual_screen_fallback_reason_action">此操作无法在虚拟屏继续</string>

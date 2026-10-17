@@ -265,7 +265,7 @@ internal class AgentLocalTools(
             return@synchronized AgentModelClient.ToolResult(JSONObject().put("ok", false)
                 .put("code", "MAIN_SCREEN_FALLBACK_${decision.name}").put("virtual_error", reason)
                 .put("message", if (decision == MainScreenFallbackDecision.UNAVAILABLE)
-                    "无法显示授权通知，请检查 Eta 通知权限及主屏回退授权通知渠道；本次未操作主屏。"
+                    "无法显示授权弹窗或通知，请检查 Eta 的悬浮窗/无障碍权限或主屏回退授权通知渠道；本次未操作主屏。"
                     else "主屏回退未获允许，本次未操作主屏；拒绝、超时或取消不会自动重试。").toString())
         }
         if (!permitted() || closed.get() || isRunCancelled() || !deviceDirectToolsEnabled()) {
@@ -283,7 +283,7 @@ internal class AgentLocalTools(
 
     private fun primarySwitchResult() = AgentModelClient.ToolResult(JSONObject().put("ok", false).put("code", "UI_DISPLAY_SWITCHED")
             .put("display", "primary").put("requires_observation", true)
-            .put("message", "用户已通过通知允许本次任务改用主屏。刚才的操作没有重放；需要时重新启动应用，并调用 observe_screen 获取主屏的新观察后再操作。").toString())
+            .put("message", "用户已允许本次任务改用主屏。刚才的操作没有重放；需要时重新启动应用，并调用 observe_screen 获取主屏的新观察后再操作。").toString())
 
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
         runCatching {

@@ -1470,12 +1470,13 @@
     <string name="automation_interrupted">Interrupted; no replay</string>
     <string name="automation_config_required">Configure a model</string>
     <string name="virtual_screen_fallback_enable">Allow requests to use the main screen</string>
-    <string name="virtual_screen_fallback_summary">If virtual screen execution is unavailable, pause and ask in a notification. Only tapping Allow authorizes the current task to use the main screen. Off by default.</string>
+    <string name="virtual_screen_fallback_summary">If virtual screen execution is unavailable, pause and ask in a dialog (a floating popup outside Eta, with a notification as backup). Only tapping Allow authorizes the current task to use the main screen. Off by default.</string>
     <string name="virtual_screen_fallback_channel">Main screen fallback approval</string>
     <string name="virtual_screen_fallback_notification_title">Permission needed to use the main screen</string>
     <string name="virtual_screen_fallback_notification_body">%1$s: %2$s. Allow this task to continue on the main screen? The task is paused until you decide; it will observe the screen again after approval.</string>
     <string name="virtual_screen_fallback_allow">Allow this task</string>
     <string name="virtual_screen_fallback_deny">Keep using virtual screen</string>
+    <string name="virtual_screen_fallback_overlay_hint">Tap outside to hide; you can still choose from the notification</string>
     <string name="virtual_screen_fallback_reason_app">the app cannot run on the virtual screen</string>
     <string name="virtual_screen_fallback_reason_device">the device cannot provide a virtual screen</string>
     <string name="virtual_screen_fallback_reason_action">this action cannot continue on the virtual screen</string>

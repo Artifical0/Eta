@@ -16,6 +16,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
+import org.robolectric.shadows.ShadowSettings
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
@@ -105,6 +106,54 @@ class MainScreenFallbackNotificationTest {
         MainScreenFallbackApproval.cancelOwner("cancelled-run")
         assertEquals(MainScreenFallbackDecision.CANCELLED, result.get(3, TimeUnit.SECONDS))
         assertTrue(shadowOf(manager).allNotifications.isEmpty())
+    }
+
+    @Test
+    fun ordinaryFallbackIsQueuedForTheDialogAndWorksWithOnlyOverlayPermission() {
+        val worker = Executors.newSingleThreadExecutor()
+        try {
+            shadowOf(context).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+            ShadowSettings.setCanDrawOverlays(false)
+            val blocked = worker.submit<MainScreenFallbackDecision> {
+                MainScreenFallbackApproval.request(context, "no-surface", "launch_app", "DISPLAY_APP_UNSUPPORTED", { false }, { true })
+            }
+            assertEquals(MainScreenFallbackDecision.UNAVAILABLE, blocked.get(3, TimeUnit.SECONDS))
+
+            ShadowSettings.setCanDrawOverlays(true)
+            val result = worker.submit<MainScreenFallbackDecision> {
+                MainScreenFallbackApproval.request(context, "overlay-only", "launch_app", "DISPLAY_APP_UNSUPPORTED", { false }, { true })
+            }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            while (MainScreenFallbackApproval.state.value.isEmpty() && System.nanoTime() < deadline) Thread.sleep(10)
+            val prompt = MainScreenFallbackApproval.state.value.single()
+            assertFalse(prompt.appConflict)
+            assertFalse(result.isDone)
+            MainScreenFallbackApproval.resolve(prompt.token, MainScreenFallbackDecision.ALLOWED)
+            assertEquals(MainScreenFallbackDecision.ALLOWED, result.get(3, TimeUnit.SECONDS))
+            assertTrue(MainScreenFallbackApproval.state.value.isEmpty())
+        } finally {
+            ShadowSettings.setCanDrawOverlays(false)
+            MainScreenFallbackApproval.cancelAll()
+            worker.shutdownNow()
+        }
+    }
+
+    @Test
+    fun dialogChoicesMatchTheNotificationActions() {
+        assertEquals(
+            listOf(MainScreenFallbackDecision.ALLOWED, MainScreenFallbackDecision.DENIED),
+            MainScreenFallbackOverlay.choices(appConflict = false).map { it.second },
+        )
+        assertEquals(
+            listOf(
+                MainScreenFallbackDecision.RESTART_VIRTUAL,
+                MainScreenFallbackDecision.ALLOWED,
+                MainScreenFallbackDecision.TASK_CANCELLED,
+            ),
+            MainScreenFallbackOverlay.choices(appConflict = true).map { it.second },
+        )
+        assertEquals(MainScreenFallbackDecision.DENIED, MainScreenFallbackOverlay.dismissDecision(false))
+        assertEquals(MainScreenFallbackDecision.TASK_CANCELLED, MainScreenFallbackOverlay.dismissDecision(true))
     }
 
     private fun waitForNotification(): Notification {

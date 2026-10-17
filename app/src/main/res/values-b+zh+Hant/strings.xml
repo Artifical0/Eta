@@ -1422,12 +1422,13 @@
     <string name="automation_interrupted">已中斷，未重播</string>
     <string name="automation_config_required">需要設定模型</string>
     <string name="virtual_screen_fallback_enable">允許請求退回主螢幕</string>
-    <string name="virtual_screen_fallback_summary">虛擬螢幕無法執行時暫停任務，並在通知中請求允許。只有點擊「允許本次任務」後才會改用主螢幕，並重新觀察。預設關閉。</string>
+    <string name="virtual_screen_fallback_summary">虛擬螢幕無法執行時暫停任務，並彈窗請求允許（不在 Eta 內時以懸浮窗彈出，同時保留通知）。只有點擊「允許本次任務」後才會改用主螢幕，並重新觀察。預設關閉。</string>
     <string name="virtual_screen_fallback_channel">主螢幕退回授權</string>
     <string name="virtual_screen_fallback_notification_title">需要允許退回主螢幕</string>
     <string name="virtual_screen_fallback_notification_body">%1$s：%2$s。是否允許本次任務改用主螢幕？任務已暫停，點擊允許後會重新觀察主螢幕再執行。</string>
     <string name="virtual_screen_fallback_allow">允許本次任務</string>
     <string name="virtual_screen_fallback_deny">繼續使用虛擬螢幕</string>
+    <string name="virtual_screen_fallback_overlay_hint">點擊彈窗外可收起，稍後在通知中繼續選擇</string>
     <string name="virtual_screen_fallback_reason_app">此應用程式無法在虛擬螢幕執行</string>
     <string name="virtual_screen_fallback_reason_device">裝置暫時無法提供虛擬螢幕</string>
     <string name="virtual_screen_fallback_reason_action">此操作無法在虛擬螢幕繼續</string>

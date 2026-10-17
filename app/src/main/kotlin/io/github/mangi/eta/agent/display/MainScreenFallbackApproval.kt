@@ -101,7 +101,9 @@ internal object MainScreenFallbackApproval {
         val appConflict = reason == "APP_ALREADY_RUNNING"
         var canNotify = app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED &&
             manager.areNotificationsEnabled()
-        if (!canNotify && !appConflict) return MainScreenFallbackDecision.UNAVAILABLE
+        // 悬浮窗弹窗与通知任一可用即可请求；两者都不可用时只有应用冲突还能等应用内对话框。
+        val canOverlay = MainScreenFallbackOverlay.available(app)
+        if (!canNotify && !canOverlay && !appConflict) return MainScreenFallbackDecision.UNAVAILABLE
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL,
@@ -111,7 +113,7 @@ internal object MainScreenFallbackApproval {
         )
         if (manager.getNotificationChannel(CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE) {
             canNotify = false
-            if (!appConflict) return MainScreenFallbackDecision.UNAVAILABLE
+            if (!canOverlay && !appConflict) return MainScreenFallbackDecision.UNAVAILABLE
         }
         val ticket = MainScreenFallbackRequest(owner, appConflict = appConflict)
         pending[ticket.token] = Pending(ticket, manager)
@@ -130,7 +132,9 @@ internal object MainScreenFallbackApproval {
             )
             val label = toolDisplayNameResource(tool)?.let { app.getString(it) } ?: app.getString(R.string.virtual_screen_viewer_title)
             val text = if (appConflict) reasonText else app.getString(R.string.virtual_screen_fallback_notification_body, label, reasonText)
-            if (appConflict) prompts.update { it + Prompt(ticket.token, true, reasonText) }
+            // 每个请求都进弹窗队列：在 Eta 内显示应用内对话框，在其他界面显示系统悬浮窗，通知作后备。
+            prompts.update { it + Prompt(ticket.token, appConflict, text) }
+            MainScreenFallbackOverlay.ensure(app)
             val builder = Notification.Builder(app, CHANNEL)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(app.getString(if (appConflict) R.string.virtual_screen_conflict_title else R.string.virtual_screen_fallback_notification_title))
