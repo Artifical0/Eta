@@ -85,7 +85,8 @@ jobs:
           path: ${{ steps.debug-apk.outputs.debug_path }}
           archive: false
           if-no-files-found: error
-          retention-days: 14
+          # fork 是公开仓库：APK 产物只留 1 天，供自己下载测试，不长期对外分发。
+          retention-days: 1
 
       - name: 还原发布证书
         env:
@@ -163,7 +164,8 @@ jobs:
           path: ${{ steps.apk.outputs.release_path }}
           archive: false
           if-no-files-found: error
-          retention-days: 14
+          # fork 是公开仓库：APK 产物只留 1 天，供自己下载测试，不长期对外分发。
+          retention-days: 1
 
       - name: 清理发布证书
         if: always()
