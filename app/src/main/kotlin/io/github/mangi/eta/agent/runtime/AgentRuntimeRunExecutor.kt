@@ -170,6 +170,7 @@ internal class AgentRuntimeRunExecutor(
                 logger = AndroidAgentLogger,
                 browserRunId = request.runId,
                 virtualScreenOwner = request.virtualScreenOwner,
+                primaryDisplay = session.primaryDisplay.get(),
                 isRunCancelled = { runController.isCancelled },
                 browserToolsEnabled = {
                     request.config.browserTools && currentPermissions().browserTools

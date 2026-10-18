@@ -1144,6 +1144,9 @@
   <string name="chat_stop">停止</string>
   <string name="chat_send">发送</string>
   <string name="chat_reasoning_effort">思考强度，当前为 %1$s</string>
+  <string name="chat_display_route">本会话的操作屏幕，当前为 %1$s</string>
+  <string name="chat_display_virtual">虚拟屏</string>
+  <string name="chat_display_primary">主屏</string>
   <string name="status_unsupported">不支持</string>
   <string name="attachment_image">图片</string>
   <string name="attachment_file">文件</string>

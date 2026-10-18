@@ -328,6 +328,15 @@ internal fun AgentChatInputBar(
 
                             Spacer(modifier = Modifier.width(2.dp))
 
+                            LocalDisplayRouteChoice.current?.let { choice ->
+                                DisplayRouteChip(
+                                    choice = choice,
+                                    enabled = !isStreaming,
+                                    popupAnchorTopPx = inputContainerTopPx,
+                                    popupMaxHeight = thinkingPopupMaxHeight,
+                                )
+                            }
+
                             if (availableReasoningEfforts.isNotEmpty()) {
                                 ThinkingEffortChip(
                                     effort = reasoningEffort,

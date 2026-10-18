@@ -116,13 +116,15 @@ internal class AgentLocalTools(
     private val onMainScreenFallback: () -> Unit = {},
     private val onVirtualTaskCancelled: () -> Unit = {},
     private val virtualScreenOwner: String = browserRunId,
+    /** 会话指定主屏：本轮按虚拟屏关闭处理，不进虚拟屏也不申请回退。 */
+    private val primaryDisplay: Boolean = false,
     private val isRunCancelled: () -> Boolean = { false },
 ) : AgentModelClient.ToolExecutor, AutoCloseable {
 
     private val closed = AtomicBoolean(false)
     private val retainVirtualScreen = AtomicBoolean(false)
     private val pausedVirtualScreen = AtomicBoolean(false)
-    private val virtualRouting = VirtualScreenRoutingPolicy(VirtualScreenSession.isOwnedBy(virtualScreenOwner))
+    private val virtualRouting = VirtualScreenRoutingPolicy(!primaryDisplay && VirtualScreenSession.isOwnedBy(virtualScreenOwner))
     private val primaryObserved = AtomicBoolean(false)
     private val fallbackLock = Any()
     private var fallbackDeclined: MainScreenFallbackDecision? = null
@@ -173,12 +175,21 @@ internal class AgentLocalTools(
     private val inspectedGitHubSnapshots =
         ConcurrentHashMap<String, GitHubInspectionSnapshot>()
 
+    init {
+        // 会话上一轮留下的虚拟屏会让同一应用继续开在虚拟屏上；改用主屏前先关掉。
+        if (primaryDisplay) VirtualScreenSession.closeOwner(virtualScreenOwner)
+    }
+
+    private fun routeSettings(): Settings = virtualScreenSettings().let {
+        if (primaryDisplay) it.copy(virtualScreenEnabled = false, virtualScreenFallbackEnabled = false) else it
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         MainScreenFallbackApproval.cancelOwner(browserRunId)
         val cancelled = isRunCancelled()
         val retain = VirtualScreenSession.isOwnedBy(virtualScreenOwner) && !virtualRouting.usesPrimary &&
-            runCatching { deviceDirectToolsEnabled() && rootAvailable() && virtualScreenSettings().virtualScreenEnabled }
+            runCatching { deviceDirectToolsEnabled() && rootAvailable() && routeSettings().virtualScreenEnabled }
                 .getOrDefault(false)
         VirtualScreenSession.releaseRun(virtualScreenOwner, browserRunId, retain,
             cancelled, paused = pausedVirtualScreen.get() && !cancelled,
@@ -194,7 +205,7 @@ internal class AgentLocalTools(
     }
 
     fun capabilitiesForRun(capabilities: AgentToolCapabilities): AgentToolCapabilities =
-        if (virtualRouting.usesPrimary) capabilities.copy(virtualScreenEnabled = false)
+        if (virtualRouting.usesPrimary || primaryDisplay) capabilities.copy(virtualScreenEnabled = false, virtualScreenFallbackEnabled = false)
         else capabilities.copy(virtualUiTreeAvailable = !virtualUiTools.uiTreeUnavailable)
 
     fun retainVirtualScreenOnSuccess() { retainVirtualScreen.set(true) }
@@ -206,7 +217,7 @@ internal class AgentLocalTools(
 
     fun recoverVirtualUi(stop: AgentModelClient.ToolStop): AgentModelClient.ToolResult {
         if (!stop.isVirtualUiPause || virtualRouting.usesPrimary || closed.get() || isRunCancelled() ||
-            !deviceDirectToolsEnabled() || !rootAvailable() || !virtualScreenSettings().virtualScreenEnabled) {
+            !deviceDirectToolsEnabled() || !rootAvailable() || !routeSettings().virtualScreenEnabled) {
             return textResult(errorResult("UI_RECOVERY_UNAVAILABLE", "任务或虚拟屏许可已失效，应用未重启"))
         }
         when (val decision = beforeToolExecution("virtual_screen")) {
@@ -236,7 +247,7 @@ internal class AgentLocalTools(
         val reason = response.optString("code")
         if (response.optBoolean("ok") || reason !in VirtualScreenRoutingPolicy.fallbackErrors) return@synchronized result
         val appConflict = reason == "APP_ALREADY_RUNNING"
-        fun permitted(): Boolean = virtualScreenSettings().let { it.virtualScreenEnabled && (appConflict || it.virtualScreenFallbackEnabled) }
+        fun permitted(): Boolean = routeSettings().let { it.virtualScreenEnabled && (appConflict || it.virtualScreenFallbackEnabled) }
         if (!permitted() || closed.get() || fallbackDeclined != null) return@synchronized result
         fun restartApp(): AgentModelClient.ToolResult {
             if (!permitted() || closed.get() || isRunCancelled() || !deviceDirectToolsEnabled()) {
@@ -249,7 +260,7 @@ internal class AgentLocalTools(
             VirtualScreenSession.recordOperation(virtualScreenOwner, browserRunId, "launch_app", JSONObject(restarted.content).optBoolean("ok"))
             return restarted
         }
-        if (appConflict && virtualScreenSettings().virtualScreenAutoRestartApps) return@synchronized restartApp()
+        if (appConflict && routeSettings().virtualScreenAutoRestartApps) return@synchronized restartApp()
         if (virtualRouting.usesPrimary) return@synchronized primarySwitchResult()
         val decision = fallbackApproval?.invoke(name, reason) ?: MainScreenFallbackApproval.request(
             context, browserRunId, name, reason, { closed.get() || isRunCancelled() }, ::permitted,
@@ -289,7 +300,7 @@ internal class AgentLocalTools(
         runCatching {
             if (closed.get()) return@runCatching textResult(errorResult("DISPLAY_CANCELLED", "任务已结束，本次工具未执行"))
             val args = JSONObject(toolCall.argumentsJson.ifBlank { "{}" })
-            val virtualSettings = if (toolCall.name in VirtualScreenRoutingPolicy.uiTools) virtualScreenSettings() else null
+            val virtualSettings = if (toolCall.name in VirtualScreenRoutingPolicy.uiTools) routeSettings() else null
             val virtualUi = virtualRouting.shouldRoute(toolCall.name, virtualSettings?.virtualScreenEnabled == true)
             if (virtualRouting.usesPrimary && virtualSettings != null) {
                 if (!virtualSettings.virtualScreenEnabled || (!primaryApprovalFromAppConflict && !virtualSettings.virtualScreenFallbackEnabled)) {
@@ -342,7 +353,8 @@ internal class AgentLocalTools(
                 return@runCatching handleVirtualResult(toolCall.name, result)
             }
             when (toolCall.name) {
-                "virtual_screen" -> if (virtualRouting.usesPrimary) textResult(errorResult("MAIN_SCREEN_ROUTE_ACTIVE", "本次任务已获准改用主屏，请使用普通 UI 工具并重新观察"))
+                "virtual_screen" -> if (primaryDisplay) textResult(errorResult("MAIN_SCREEN_ROUTE_ACTIVE", "用户已指定本会话使用主屏，请直接用普通 UI 工具操作"))
+                    else if (virtualRouting.usesPrimary) textResult(errorResult("MAIN_SCREEN_ROUTE_ACTIVE", "本次任务已获准改用主屏，请使用普通 UI 工具并重新观察"))
                     else if (!VirtualScreenSession.prepareForRun(virtualScreenOwner, browserRunId)) textResult(errorResult("DISPLAY_BUSY", "虚拟屏正被其他任务使用"))
                     else VirtualScreenSession.execute(context, virtualScreenOwner, args, closed::get, browserRunId).let { result ->
                         if (args.optString("action") == "close") result else handleVirtualResult(toolCall.name, result)
@@ -926,7 +938,7 @@ internal class AgentLocalTools(
                 message = "应用不可启动或未安装：${app.packageName}"
             )
         }
-        if (virtualRouting.shouldRoute("launch_app", virtualScreenSettings().virtualScreenEnabled)) {
+        if (virtualRouting.shouldRoute("launch_app", routeSettings().virtualScreenEnabled)) {
             val component = launchIntent.component ?: return errorResult("NO_ACTIVITY", "没有确定的启动 Activity")
             return virtualUiTools.launchComponent(component.flattenToString()).content
         }
@@ -953,7 +965,7 @@ internal class AgentLocalTools(
         val context = requireContext()
         val intent = Intent(Intent.ACTION_VIEW, uri)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (virtualRouting.shouldRoute("open_uri", virtualScreenSettings().virtualScreenEnabled)) {
+        if (virtualRouting.shouldRoute("open_uri", routeSettings().virtualScreenEnabled)) {
             val target = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo
                 ?: return errorResult("NO_ACTIVITY", "没有确定的 URI 处理应用")
             if (target.packageName == "android" || target.name.contains("ResolverActivity")) {

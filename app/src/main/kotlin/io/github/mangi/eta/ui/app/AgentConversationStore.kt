@@ -2,6 +2,7 @@ package io.github.mangi.eta.ui.app
 
 import android.content.Context
 import androidx.room.withTransaction
+import io.github.mangi.eta.agent.display.ConversationDisplayRoute
 import io.github.mangi.eta.agent.model.AgentConversationCodec
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
@@ -212,6 +213,7 @@ internal object AgentConversationStore {
                 thinkingEnabled = conversation.reasoningEffortValue.enablesReasoning,
                 reasoningEffort = conversation.reasoningEffortValue,
                 modelId = conversation.modelId,
+                primaryDisplay = ConversationDisplayRoute.usesPrimary(context, conversation.id),
             ).let { original ->
                 ExternalConversationHistory.repair(conversation.id, original).also { repaired ->
                     if (repaired.history != original.history || repaired.journal != original.journal) unaligned += conversation.id

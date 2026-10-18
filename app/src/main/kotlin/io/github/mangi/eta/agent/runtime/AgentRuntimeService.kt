@@ -39,6 +39,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.agent.accessibility.AgentAccessibilityService
 import io.github.mangi.eta.agent.device.RootAccess
+import io.github.mangi.eta.agent.display.ConversationDisplayRoute
 import io.github.mangi.eta.agent.display.VirtualScreenRoutingPolicy
 import io.github.mangi.eta.agent.display.VirtualScreenSession
 import io.github.mangi.eta.agent.media.AgentImageCodec
@@ -397,7 +398,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             operation = request.operation,
             eventSink = { event ->
                 val current = activeSession?.takeIf { it.runId == request.runId }
-                if (current != null && event is AgentEvent.ToolStarted &&
+                if (current != null && !current.primaryDisplay.get() && event is AgentEvent.ToolStarted &&
                     (event.name in VirtualScreenRoutingPolicy.uiTools || event.name == "virtual_screen") &&
                     runBlocking { SettingsDataStore.settings() }.virtualScreenEnabled
                 ) {
@@ -410,7 +411,12 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 sendResultTo(replyTo, result)
             },
         )
-        session.virtualUiRouted.set(VirtualScreenSession.isOwnedBy(request.virtualScreenOwner))
+        val primaryDisplay = ConversationDisplayRoute.usesPrimary(this, request.handoff
+            ?.takeIf { it.source == AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE }
+            ?.let { AgentUiHandoffPayload.from(it.payload).conversationId })
+        session.primaryDisplay.set(primaryDisplay)
+        session.mainScreenFallbackApproved.set(primaryDisplay)
+        session.virtualUiRouted.set(!primaryDisplay && VirtualScreenSession.isOwnedBy(request.virtualScreenOwner))
         // Root 入口保留原有绑定服务生命周期；新增 FGS 不能成为厂商后台入口的新前置权限。
         val allowBoundFallback = RootAccess.isGranted || automated
         val executionHeld = AgentExecutionService.acquire(

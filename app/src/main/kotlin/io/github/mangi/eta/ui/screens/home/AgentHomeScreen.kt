@@ -2,15 +2,22 @@ package io.github.mangi.eta.ui.screens.home
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import io.github.mangi.eta.data.datastore.SettingsDataStore
 import io.github.mangi.eta.ui.components.AgentChatBody
+import io.github.mangi.eta.ui.components.DisplayRouteChoice
+import io.github.mangi.eta.ui.components.LocalDisplayRouteChoice
 import io.github.mangi.eta.ui.components.LocalRoleplayChat
 import io.github.mangi.eta.ui.components.chatConversationCompositionKey
 import io.github.mangi.eta.ui.model.AgentChatHomeUiState
 import io.github.mangi.eta.ui.model.AgentHomeAction
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 import io.github.mangi.eta.ui.model.roleplayChatUi
+import kotlinx.coroutines.flow.map
 
 /**
  * AgentChatHome：首屏为聊天主舞台。
@@ -27,8 +34,16 @@ internal fun AgentHomeScreen(
     isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val virtualScreenEnabled by remember { SettingsDataStore.settingsFlow().map { it.virtualScreenEnabled } }
+        .collectAsState(initial = false)
+    val displayChoice = if (virtualScreenEnabled) {
+        DisplayRouteChoice(state.primaryDisplay) { onAction(AgentHomeAction.PrimaryDisplayChanged(it)) }
+    } else null
     key(chatConversationCompositionKey(conversationKey)) {
-        CompositionLocalProvider(LocalRoleplayChat provides state.roleplayChatUi()) {
+        CompositionLocalProvider(
+            LocalRoleplayChat provides state.roleplayChatUi(),
+            LocalDisplayRouteChoice provides displayChoice,
+        ) {
         AgentChatBody(
             messages = state.messages,
             modelPickerState = modelPickerState,

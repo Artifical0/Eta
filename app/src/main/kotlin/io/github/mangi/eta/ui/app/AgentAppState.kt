@@ -15,6 +15,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.device.AgentFileReferenceGateway
+import io.github.mangi.eta.agent.display.ConversationDisplayRoute
 import io.github.mangi.eta.agent.device.RootAccess
 import io.github.mangi.eta.agent.media.AgentImageCodec
 import io.github.mangi.eta.agent.model.AgentFileReference
@@ -646,6 +647,13 @@ internal class AgentAppState(
         if (selectedConversationId != null) persistConversations()
     }
 
+    /** 草稿会话先记在界面状态里，首次发送时随会话 id 写入。 */
+    fun updatePrimaryDisplay(primary: Boolean) {
+        if (homeState.isStreaming) return
+        updateCurrentConversation(homeState.copy(primaryDisplay = primary))
+        selectedConversationId?.let { ConversationDisplayRoute.set(appContext, it, primary) }
+    }
+
     /** 聊天内切换同时改当前会话绑定与默认模型；默认模型供新会话和系统助手入口使用。 */
     fun selectModel(modelId: String) {
         if (
@@ -765,6 +773,7 @@ internal class AgentAppState(
 
     fun deleteConversation(conversationId: String) {
         val wasSelected = selectedConversationId == conversationId
+        ConversationDisplayRoute.set(appContext, conversationId, false)
         conversationsById = conversationsById - conversationId
         conversationTitles = conversationTitles - conversationId
         conversationUpdatedAt = conversationUpdatedAt - conversationId
@@ -1149,6 +1158,8 @@ internal class AgentAppState(
     ) {
         runConversationIds[runId] = conversationId
         currentRunId = runId
+        // Runtime 在 run 开始时按会话读取屏幕选择；草稿会话到这里才有 id。
+        ConversationDisplayRoute.set(appContext, conversationId, state.primaryDisplay)
         // 发送即绑定：会话记住本轮实际使用的模型，回落到默认模型时也随之更新。
         val runModelId = state.effectiveModelId
 

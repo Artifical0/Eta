@@ -122,6 +122,45 @@ class VirtualScreenRoutingTest {
     }
 
     @Test
+    fun conversationPrimaryDisplayKeepsUiToolsOnMainScreen() {
+        val executed = mutableListOf<String>()
+        val guards = mutableListOf<String>()
+        AgentLocalTools(
+            RuntimeEnvironment.getApplication(), NoOpLogger, browserRunId = "primary-test",
+            deviceDirectToolsEnabled = { true }, rootAvailable = { true },
+            virtualScreenSettings = { Settings(virtualScreenEnabled = true, virtualScreenFallbackEnabled = true) },
+            beforeToolExecution = { guards += it; ToolExecutionDecision.Reject("STOP", "测试只检查路由") },
+            virtualUiExecutor = { name, _ -> executed += name; result(true) },
+            primaryDisplay = true,
+        ).use { tools ->
+            VirtualScreenRoutingPolicy.uiTools.forEach { name ->
+                // 敏感工具可能先被权限拦下；只要没进虚拟屏执行器即可。
+                assertFalse(name, JSONObject(tools.execute(AgentModelClient.ToolCall(name, name, "{}")).content).optBoolean("ok"))
+            }
+            val direct = tools.execute(AgentModelClient.ToolCall("vs", "virtual_screen", "{\"action\":\"launch\"}"))
+            assertEquals("MAIN_SCREEN_ROUTE_ACTIVE", JSONObject(direct.content).optString("code"))
+            val capabilities = tools.capabilitiesForRun(AgentToolCapabilities(rootAvailable = true, virtualScreenEnabled = true,
+                virtualScreenFallbackEnabled = true))
+            assertFalse(capabilities.virtualScreenEnabled)
+            assertFalse(capabilities.virtualScreenFallbackEnabled)
+        }
+        assertTrue(executed.isEmpty())
+        assertFalse("virtual_screen" in guards)
+    }
+
+    @Test
+    fun conversationDisplayRouteIsStoredPerConversation() {
+        val app = RuntimeEnvironment.getApplication()
+        assertFalse(ConversationDisplayRoute.usesPrimary(app, "a"))
+        ConversationDisplayRoute.set(app, "a", true)
+        assertTrue(ConversationDisplayRoute.usesPrimary(app, "a"))
+        assertFalse(ConversationDisplayRoute.usesPrimary(app, "b"))
+        assertFalse(ConversationDisplayRoute.usesPrimary(app, null))
+        ConversationDisplayRoute.set(app, "a", false)
+        assertFalse(ConversationDisplayRoute.usesPrimary(app, "a"))
+    }
+
+    @Test
     fun failedVirtualActionIsReturnedWithoutFallbackOrObservationOfPrimaryScreen() {
         var observedPrimary = false
         AgentLocalTools(

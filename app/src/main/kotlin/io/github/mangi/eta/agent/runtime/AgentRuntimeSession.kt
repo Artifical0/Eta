@@ -21,6 +21,8 @@ internal class AgentRuntimeSession(
 ) {
     val virtualUiRouted = java.util.concurrent.atomic.AtomicBoolean(false)
     val mainScreenFallbackApproved = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** 用户在会话里指定了主屏：整轮不进虚拟屏，也视同已允许主屏操作。 */
+    val primaryDisplay = java.util.concurrent.atomic.AtomicBoolean(false)
     private enum class State {
         RUNNING,
         COMMITTING,
