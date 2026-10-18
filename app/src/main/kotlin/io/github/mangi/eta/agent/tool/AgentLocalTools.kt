@@ -299,6 +299,9 @@ internal class AgentLocalTools(
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
         runCatching {
             if (closed.get()) return@runCatching textResult(errorResult("DISPLAY_CANCELLED", "任务已结束，本次工具未执行"))
+            if (primaryDisplay && toolCall.name == "virtual_screen") {
+                return@runCatching textResult(errorResult("MAIN_SCREEN_ROUTE_ACTIVE", "用户已指定本会话使用主屏，请直接用普通 UI 工具操作"))
+            }
             val args = JSONObject(toolCall.argumentsJson.ifBlank { "{}" })
             val virtualSettings = if (toolCall.name in VirtualScreenRoutingPolicy.uiTools) routeSettings() else null
             val virtualUi = virtualRouting.shouldRoute(toolCall.name, virtualSettings?.virtualScreenEnabled == true)
@@ -353,8 +356,7 @@ internal class AgentLocalTools(
                 return@runCatching handleVirtualResult(toolCall.name, result)
             }
             when (toolCall.name) {
-                "virtual_screen" -> if (primaryDisplay) textResult(errorResult("MAIN_SCREEN_ROUTE_ACTIVE", "用户已指定本会话使用主屏，请直接用普通 UI 工具操作"))
-                    else if (virtualRouting.usesPrimary) textResult(errorResult("MAIN_SCREEN_ROUTE_ACTIVE", "本次任务已获准改用主屏，请使用普通 UI 工具并重新观察"))
+                "virtual_screen" -> if (virtualRouting.usesPrimary) textResult(errorResult("MAIN_SCREEN_ROUTE_ACTIVE", "本次任务已获准改用主屏，请使用普通 UI 工具并重新观察"))
                     else if (!VirtualScreenSession.prepareForRun(virtualScreenOwner, browserRunId)) textResult(errorResult("DISPLAY_BUSY", "虚拟屏正被其他任务使用"))
                     else VirtualScreenSession.execute(context, virtualScreenOwner, args, closed::get, browserRunId).let { result ->
                         if (args.optString("action") == "close") result else handleVirtualResult(toolCall.name, result)
