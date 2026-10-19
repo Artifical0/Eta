@@ -53,7 +53,7 @@ internal object AutoBackupScheduler {
         val resolver = context.contentResolver
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val name = "$PREFIX${System.currentTimeMillis()}-${UUID.randomUUID()}.json"
-        val document = DocumentsContract.createDocument(resolver, parent, "application/json", name)
+        val document = DocumentsContract.createDocument(resolver, parent, "application/json", "$name.partial")
             ?: error("BACKUP_CREATE_FAILED")
         try {
             resolver.openOutputStream(document, "wt")?.use { EtaBackupRepository.export(context, it) }
@@ -62,6 +62,8 @@ internal object AutoBackupScheduler {
             runCatching { DocumentsContract.deleteDocument(resolver, document) }
             throw error
         }
+        val completed = DocumentsContract.renameDocument(resolver, document, name)
+            ?: error("BACKUP_FINALIZE_FAILED")
         // Keep the successful new backup plus six previous owned files.
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val previous = mutableListOf<Pair<String, String>>()
@@ -69,7 +71,7 @@ internal object AutoBackupScheduler {
             DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
             while (cursor.moveToNext()) {
                 val id = cursor.getString(0); val childName = cursor.getString(1).orEmpty()
-                if (ownedBackup(childName) && id != DocumentsContract.getDocumentId(document)) previous += childName to id
+                if (ownedBackup(childName) && id != DocumentsContract.getDocumentId(completed)) previous += childName to id
             }
         }
         previous.sortedByDescending { it.first }.drop(6).forEach { (_, id) ->
