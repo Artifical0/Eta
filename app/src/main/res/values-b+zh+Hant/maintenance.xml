@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auto_backup_warning_title">備份包含敏感資料</string>
+    <string name="auto_backup_warning">備份包含聊天、記憶與服務商憑據，採用明文格式。請選擇可信目錄；雲端目錄可能上傳這些檔案。啟用即表示確認。</string>
+    <string name="auto_backup_enable">啟用每日自動備份並選擇目錄</string>
+    <string name="auto_backup_disable">關閉自動備份</string>
+    <string name="auto_backup_summary">約每日充電且電量不低時執行，保留七份 Eta 自動建立的完整備份。Android 可能延遲執行。</string>
+    <string name="auto_backup_now">立即備份</string>
+    <string name="diagnostics_export">匯出診斷 ZIP</string>
+    <string name="diagnostics_summary">僅包含應用/API 版本、裝置型號與最近一次去識別化崩潰堆疊，不包含聊天、憑據、通知正文或完整裝置日誌。</string>
+    <string name="maintenance_success">操作完成</string>
+    <string name="maintenance_failed">操作失敗，請檢查目錄權限與可用空間</string>
+</resources>

@@ -118,6 +118,9 @@ internal fun DataBackupScreen(
                 )
             }
         }
+        item(key = "maintenance") {
+            BackupMaintenanceControls()
+        }
         item(key = "actions-title") {
             EtaPreferenceGroupTitle(stringResource(R.string.data_backup_actions))
         }

@@ -48,6 +48,8 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
         if (!AppProcessPolicy.shouldInitializeFullRuntime(Application.getProcessName(), packageName)) {
             return
         }
+        io.github.mangi.eta.core.DiagnosticsBundle.install(this)
+        runCatching { io.github.mangi.eta.data.repository.AutoBackupScheduler.schedule(this) }
         TerminalRuntime.initialize(this)
         RootAccess.initialize(this)
         applicationScope.launch { TerminalRuntime.backgroundJobs(this@EtaApp).resume() }
