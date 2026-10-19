@@ -29,6 +29,22 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33, 36], application = android.app.Application::class)
 class AgentRuntimeWireTest {
     @Test
+    fun queuedSupplementKeepsDeliveryModeAcrossIpc() {
+        val event = AgentEvent.UserSupplementReceived(5, "next round", queued = true)
+        assertEquals(event, AgentRuntimeWire.eventFromBundle(AgentRuntimeWire.eventToBundle(event)))
+        val legacy = AgentRuntimeWire.eventToBundle(event).apply { remove("queued") }
+        assertFalse((AgentRuntimeWire.eventFromBundle(legacy) as AgentEvent.UserSupplementReceived).queued)
+    }
+
+    @Test
+    fun queuedSupplementKeepsDeliveryModeInHandoff() {
+        val payload = AgentUiHandoffPayload("conversation", supplements = listOf(
+            AgentUiHandoffPayload.Supplement(1, "queued", 123L, queued = true)
+        ))
+        assertEquals(payload, AgentUiHandoffPayload.from(payload.toJson()))
+    }
+
+    @Test
     fun interjectionPayloadIsBoundToOneRunAndRejectsInvalidText() {
         val bundle = AgentRuntimeWire.steerBundle("run", "改成第二种方案")
         assertEquals("run", AgentRuntimeWire.runIdFromBundle(bundle))

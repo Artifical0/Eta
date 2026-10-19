@@ -48,6 +48,8 @@ data class UserMessageUi(
     val content: String,
     val images: List<String> = emptyList(),
     val isEdited: Boolean = false,
+    /** Delivery mode, not a claim that the model has already consumed this message. */
+    val queuedSupplement: Boolean = false,
 ) : AgentChatMessageUi
 
 @Immutable

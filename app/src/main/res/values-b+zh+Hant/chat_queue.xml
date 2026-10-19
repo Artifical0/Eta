@@ -2,4 +2,5 @@
 <resources>
     <string name="chat_queue_hint">補充要求，目前回合結束後依序處理</string>
     <string name="chat_queue_send">排隊傳送</string>
+    <string name="chat_queue_sent">排隊傳送</string>
 </resources>

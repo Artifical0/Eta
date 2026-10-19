@@ -263,7 +263,17 @@ internal class VirtualScreenUiTools(
         )
         if (capture != null && !JSONObject(capture.content).optBoolean("ok")) {
             json.put("screenshot_error", JSONObject(capture.content).optString("code"))
-            if (nodes == null) return capture
+            if (nodes == null) {
+                if (JSONObject(capture.content).optString("code") != "DISPLAY_FRAME_PENDING") return capture
+                // No pixels is not a reason to request control of the phone screen.
+                // Return a pending observation without granting coordinate input readiness.
+                json.put("state", if (info.focusedPackage.isBlank()) "empty_display" else "loading")
+                    .put("ready", false)
+                    .put("message", if (info.focusedPackage.isBlank())
+                        "虚拟屏已创建，尚未打开应用；请先启动目标应用。不会切换到主屏。"
+                        else "应用画面尚未就绪，请稍后重新观察；不要根据空画面点击。")
+                return AgentModelClient.ToolResult(json.toString(), sensitive = true)
+            }
         }
         if (capture == null) VirtualScreenSession.checkUiObservation(context, owner)?.let { return it }
         val latest = VirtualScreenSession.state.value.display

@@ -399,6 +399,13 @@ private fun UserMessageBubble(
                         vertical = if (assistantOverlay) 8.dp else 12.dp,
                     ),
             ) {
+                if (message.queuedSupplement) {
+                    Text(
+                        text = stringResource(R.string.chat_queue_sent),
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
                 if (message.images.isNotEmpty()) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),

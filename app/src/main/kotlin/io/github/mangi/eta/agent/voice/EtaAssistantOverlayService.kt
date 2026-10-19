@@ -552,7 +552,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
             is AgentEvent.UserSupplementReceived -> {
                 val id = "user-$runId-supplement-${event.index}"
                 if (messages.none { it.id == id }) {
-                    messages = messages + UserMessageUi(id = id, content = event.text)
+                    messages = messages + UserMessageUi(id = id, content = event.text, queuedSupplement = event.queued)
                 }
             }
             is AgentEvent.ToolStarted -> status = EtaVoiceStatus.RunningTool(event.name)

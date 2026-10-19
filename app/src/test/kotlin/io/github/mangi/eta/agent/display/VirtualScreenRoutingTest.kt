@@ -20,6 +20,12 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class VirtualScreenRoutingTest {
     @Test
+    fun pendingFrameNeverRequestsPrimaryScreenFallback() {
+        assertFalse("DISPLAY_FRAME_PENDING" in VirtualScreenRoutingPolicy.fallbackErrors)
+        assertTrue("ROOT_DISPLAY_UNAVAILABLE" in VirtualScreenRoutingPolicy.fallbackErrors)
+    }
+
+    @Test
     fun recoveryRechecksRootDirectPermissionSettingsAndCancellation() {
         for (denied in listOf("root", "direct", "setting", "cancelled")) {
             var dispatches = 0

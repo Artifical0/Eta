@@ -270,7 +270,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     val valid = runCatching { AgentRuntimeWire.steerBundle(runId, text) }.isSuccess
                     val accepted = valid && if (msg.data.getBoolean("queued")) {
                         val current = activeSession?.takeIf { it.runId == runId && pendingStartRequest == null }
-                        current?.enqueue(text) { recordSupplementEvent(text) } != null
+                        current?.enqueue(text) { recordSupplementEvent(text, queued = true) } != null
                     } else requestSupplement(text, expectedRunId = runId)
                     runCatching {
                         msg.replyTo?.send(Message.obtain(null, AgentRuntimeWire.MSG_STEER_RESPONSE).apply {
@@ -916,17 +916,19 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         return true
     }
 
-    private fun recordSupplementEvent(text: String): AgentEvent.UserSupplementReceived {
+    private fun recordSupplementEvent(text: String, queued: Boolean = false): AgentEvent.UserSupplementReceived {
         val supplement = synchronized(supplementsLock) {
             AgentUiHandoffPayload.Supplement(
                 index = nextSupplementIndex++,
                 text = text,
                 createdAt = System.currentTimeMillis(),
+                queued = queued,
             ).also { activeSupplements += it }
         }
         return AgentEvent.UserSupplementReceived(
             index = supplement.index,
             text = supplement.text,
+            queued = supplement.queued,
         )
     }
 

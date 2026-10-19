@@ -1584,7 +1584,7 @@ internal class AgentAppState(
         }
         when (event) {
             is AgentEvent.UserSupplementReceived ->
-                insertSupplementMessage(runId, event.index, event.text, persist = persistSupplement)
+                insertSupplementMessage(runId, event.index, event.text, persist = persistSupplement, queued = event.queued)
             is AgentEvent.RunStarted -> if (runId in stopRequestedRunIds) scope.launch(Dispatchers.IO) {
                 AgentRuntimeClient(appContext, AndroidAgentLogger).cancelRun(runId)
             }
@@ -1702,6 +1702,7 @@ internal class AgentAppState(
         index: Int,
         text: String,
         persist: Boolean = true,
+        queued: Boolean = false,
     ) {
         updateMessages(runId) { messages ->
             AgentPendingResultRecovery.mergeSupplements(
@@ -1711,6 +1712,7 @@ internal class AgentAppState(
                         index = index,
                         text = text,
                         createdAt = System.currentTimeMillis(),
+                        queued = queued,
                     )
                 ),
                 messages = messages,

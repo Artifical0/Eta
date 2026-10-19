@@ -743,6 +743,7 @@ internal object AgentRuntimeWire {
                 putString(KEY_TYPE, "user_supplement_received")
                 putInt("index", event.index)
                 putString("text", event.text)
+                putBoolean("queued", event.queued)
             }
 
             is AgentEvent.ToolStarted -> {
@@ -889,6 +890,7 @@ internal object AgentRuntimeWire {
         "user_supplement_received" -> AgentEvent.UserSupplementReceived(
             index = bundle.getInt("index"),
             text = bundle.getString("text").orEmpty(),
+            queued = bundle.getBoolean("queued"),
         )
 
         "tool_started" -> AgentEvent.ToolStarted(
