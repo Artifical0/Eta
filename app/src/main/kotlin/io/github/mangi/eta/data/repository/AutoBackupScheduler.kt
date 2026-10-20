@@ -27,15 +27,28 @@ internal object AutoBackupScheduler {
     private val lock = Mutex()
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     fun enabled(context: Context) = prefs(context).getBoolean("enabled", false)
-    fun status(context: Context): String = prefs(context).getString("status", "").orEmpty()
+    fun status(context: Context): String {
+        val raw = prefs(context).getString("status", "").orEmpty()
+        val time = raw.removePrefix("OK ").toLongOrNull() ?: return raw
+        return "OK " + java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+            .format(java.util.Date(time))
+    }
     fun configure(context: Context, tree: Uri?) {
+        val previous = prefs(context).getString("tree", null)
         check(prefs(context).edit().putBoolean("enabled", tree != null)
             .putString("tree", tree?.toString()).commit())
+        // 关闭或换目录时归还旧目录的持久授权，避免占满系统授权配额。
+        if (previous != null && previous != tree?.toString()) runCatching {
+            context.contentResolver.releasePersistableUriPermission(Uri.parse(previous),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }
         schedule(context)
     }
     fun schedule(context: Context) {
         val scheduler = context.getSystemService(JobScheduler::class.java)
         if (!enabled(context)) { scheduler.cancel(JOB_ID); return }
+        // 应用每次启动都会调用；重复 schedule 会重置周期计时，频繁打开时备份可能永远不执行。
+        if (scheduler.getPendingJob(JOB_ID) != null) return
         val result = scheduler.schedule(JobInfo.Builder(JOB_ID,
             ComponentName(context, AutoBackupJobService::class.java))
             .setPersisted(true).setRequiresCharging(true).setRequiresBatteryNotLow(true)
@@ -44,6 +57,9 @@ internal object AutoBackupScheduler {
     }
     fun ownedBackup(name: String): Boolean =
         Regex("eta-auto-[0-9]+-[a-f0-9-]{36}\\.json").matches(name)
+    /** 进程被杀留下的半成品；SAF 可能按 MIME 再补一个 .json 后缀。 */
+    fun ownedPartial(name: String): Boolean =
+        Regex("eta-auto-[0-9]+-[a-f0-9-]{36}\\.json\\.partial(\\.json)?").matches(name)
 
     /** Export before pruning. Failed exports are deleted; unrelated documents are never touched. */
     suspend fun run(context: Context) = lock.withLock {
@@ -67,14 +83,17 @@ internal object AutoBackupScheduler {
         // Keep the successful new backup plus six previous owned files.
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val previous = mutableListOf<Pair<String, String>>()
+        val stale = mutableListOf<String>()
         resolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,
             DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cursor ->
             while (cursor.moveToNext()) {
                 val id = cursor.getString(0); val childName = cursor.getString(1).orEmpty()
                 if (ownedBackup(childName) && id != DocumentsContract.getDocumentId(completed)) previous += childName to id
+                // run 在进程内串行，此刻存在的半成品都来自之前中断的执行。
+                if (ownedPartial(childName)) stale += id
             }
         }
-        previous.sortedByDescending { it.first }.drop(6).forEach { (_, id) ->
+        (previous.sortedByDescending { it.first }.drop(6).map { it.second } + stale).forEach { id ->
             runCatching { DocumentsContract.deleteDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(tree, id)) }
         }
         prefs(context).edit().putString("status", "OK ${System.currentTimeMillis()}").apply()

@@ -19,6 +19,18 @@ class AutoBackupSchedulerTest {
         assertFalse(AutoBackupScheduler.ownedBackup("my-backup.json"))
         assertFalse(AutoBackupScheduler.ownedBackup("eta-auto-not-a-backup.json"))
         assertFalse(AutoBackupScheduler.ownedBackup("eta-auto-123-12345678-1234-1234-1234-123456789abc.json.partial"))
+        assertTrue(AutoBackupScheduler.ownedPartial("eta-auto-123-12345678-1234-1234-1234-123456789abc.json.partial"))
+        assertTrue(AutoBackupScheduler.ownedPartial("eta-auto-123-12345678-1234-1234-1234-123456789abc.json.partial.json"))
+        assertFalse(AutoBackupScheduler.ownedPartial("my-backup.json.partial"))
+    }
+    @Test fun repeatedScheduleKeepsExistingPeriodicJob() {
+        val context = RuntimeEnvironment.getApplication() as Context
+        AutoBackupScheduler.configure(context, Uri.parse("content://test/tree/backup"))
+        val scheduler = context.getSystemService(JobScheduler::class.java)
+        val first = scheduler.getPendingJob(12031)
+        AutoBackupScheduler.schedule(context)
+        assertSame(first, scheduler.getPendingJob(12031))
+        AutoBackupScheduler.configure(context, null)
     }
     @Test fun optInSchedulesConstrainedJobAndDisableCancelsIt() {
         val context = RuntimeEnvironment.getApplication() as Context
