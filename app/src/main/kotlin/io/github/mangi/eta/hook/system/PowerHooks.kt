@@ -23,6 +23,9 @@ internal object PowerHooks {
     @Volatile
     private var lastInterceptUptime = 0L
 
+    /** 消息入口已决定回退原逻辑时，同线程内的 startSpeech 不再重复尝试。 */
+    private val nativeFallbackInProgress = ThreadLocal<Boolean>()
+
     private enum class LaunchResult {
         LAUNCHED,
         ACTIVITY_FALLBACK_REQUIRED,
@@ -38,6 +41,114 @@ internal object PowerHooks {
         return hooks.install {
             // 当前机型实测证明 OplusSpeechHandler 是必要路径，目标在热路径即时读取。
             hookOplusSpeechHandler(hooks, classLoader)
+            // 平板横屏、Home 长按与键盘快捷键等入口不经消息，直接调用 startSpeech。
+            hookOplusStartSpeech(hooks, classLoader)
+        }
+    }
+
+    private fun hookOplusStartSpeech(
+        hooks: HookRegistrar,
+        classLoader: ClassLoader
+    ) {
+        val logger = hooks.logger
+        val extClass = HookSupport.findClassOrNull(classLoader, ModuleConfig.OP_LUS_PHONE_WINDOW_MANAGER_EXT_CLASS)
+        val startSpeechMethod = extClass?.let {
+            HookSupport.findMethod(
+                it,
+                "startSpeech",
+                Int::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!,
+                Long::class.javaPrimitiveType!!
+            )
+        }
+        if (startSpeechMethod == null) {
+            hooks.missing(
+                id = "system.power-assist-start-speech",
+                description = "PhoneWindowManagerExtImpl.startSpeech",
+                detail = "未找到 PhoneWindowManagerExtImpl.startSpeech(int, int, long)"
+            )
+            return
+        }
+
+        hooks.intercept(
+            id = "system.power-assist-start-speech",
+            executable = startSpeechMethod,
+            description = "PhoneWindowManagerExtImpl.startSpeech"
+        ) { chain ->
+            if (nativeFallbackInProgress.get() == true) {
+                return@intercept chain.proceed()
+            }
+            val ext = chain.getThisObject() ?: return@intercept chain.proceed()
+            // 原逻辑用该标记去重同一次按键；已处理时交给原方法记录并忽略。
+            if (HookSupport.getFieldValue(ext, "mSpeechLongPressHandled") == true) {
+                return@intercept chain.proceed()
+            }
+            val pwm = HookSupport.getFieldValue(ext, "mBase")?.takeIf(::hasContext)
+            if (pwm == null) {
+                logger.warnThrottled("start_speech_missing_pwm") {
+                    "startSpeech 未能解析 PhoneWindowManager，回退原逻辑"
+                }
+                return@intercept chain.proceed()
+            }
+            val source = "startSpeech(${chain.getArg(1)})"
+            if (launchOrFallback(
+                    logger = logger,
+                    phoneWindowManager = pwm,
+                    handler = HookSupport.getFieldValue(ext, "mAsynHandler") as? Handler,
+                    source = source
+                )) {
+                runCatching { HookSupport.findField(ext.javaClass, "mSpeechLongPressHandled")?.setBoolean(ext, true) }
+                null
+            } else {
+                chain.proceed()
+            }
+        }
+    }
+
+    private fun hasContext(target: Any): Boolean =
+        HookSupport.getFieldValue(target, "mContext") is Context
+
+    /** 返回 true 表示已由目标助理接管；false 时调用方必须执行原逻辑。 */
+    private fun launchOrFallback(
+        logger: ModuleLogger,
+        phoneWindowManager: Any,
+        handler: Handler?,
+        source: String
+    ): Boolean {
+        val target = Prefs.powerAssistantTarget()
+        val binding = assistantBindingFor(target) ?: return false
+        return when (tryLaunchAssistant(
+            target = target,
+            binding = binding,
+            logger = logger,
+            phoneWindowManager = phoneWindowManager,
+            source = source
+        )) {
+            LaunchResult.LAUNCHED -> true
+            LaunchResult.ACTIVITY_FALLBACK_REQUIRED -> {
+                val activityStarted = tryStartAssistantActivityFallback(
+                    target = target,
+                    binding = binding,
+                    logger = logger,
+                    phoneWindowManager = phoneWindowManager,
+                    source = source
+                )
+                // Activity 兜底能处理本次触发，但仍需后台修复首选 voiceinteraction 路径。
+                scheduleBackgroundRecovery(
+                    handler = handler,
+                    logger = logger,
+                    phoneWindowManager = phoneWindowManager,
+                    source = source
+                )
+                if (!activityStarted) {
+                    logger.warnThrottled("${source}_native_fallback") {
+                        "$source: ${binding.displayName} 启动失败，回退原逻辑"
+                    }
+                }
+                // 当前触发不等待后台修复；所有快速路径失败后立即回退小布。
+                activityStarted
+            }
+            LaunchResult.NOT_HANDLED -> false
         }
     }
 
@@ -69,9 +180,7 @@ internal object PowerHooks {
                 return@intercept chain.proceed()
             }
 
-            val target = Prefs.powerAssistantTarget()
-            val binding = assistantBindingFor(target)
-            if (binding == null) {
+            if (assistantBindingFor(Prefs.powerAssistantTarget()) == null) {
                 return@intercept chain.proceed()
             }
 
@@ -84,37 +193,15 @@ internal object PowerHooks {
                 return@intercept chain.proceed()
             }
 
-            when (tryLaunchAssistant(
-                target = target,
-                binding = binding,
-                logger = logger,
-                phoneWindowManager = pwm,
-                source = "OplusSpeechHandler"
-            )) {
-                LaunchResult.LAUNCHED -> null
-                LaunchResult.ACTIVITY_FALLBACK_REQUIRED -> {
-                    val activityStarted = tryStartAssistantActivityFallback(
-                        target = target,
-                        binding = binding,
-                        logger = logger,
-                        phoneWindowManager = pwm,
-                        source = "OplusSpeechHandler"
-                    )
-                    // Activity 兜底能处理本次触发，但仍需后台修复首选 voiceinteraction 路径。
-                    scheduleBackgroundRecovery(
-                        handler = handler,
-                        logger = logger,
-                        phoneWindowManager = pwm,
-                        source = "OplusSpeechHandler"
-                    )
-                    if (activityStarted) {
-                        null
-                    } else {
-                        // 当前触发不等待后台修复；所有快速路径失败后立即回退小布。
-                        chain.proceed()
-                    }
+            if (launchOrFallback(logger, pwm, handler, "OplusSpeechHandler")) {
+                null
+            } else {
+                nativeFallbackInProgress.set(true)
+                try {
+                    chain.proceed()
+                } finally {
+                    nativeFallbackInProgress.remove()
                 }
-                LaunchResult.NOT_HANDLED -> chain.proceed()
             }
         }
     }

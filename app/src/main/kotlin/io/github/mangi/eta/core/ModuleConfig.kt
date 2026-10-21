@@ -40,6 +40,8 @@ internal object ModuleConfig {
         "com.oplus.infocollection.data.CollectionStartInfo"
     const val SYSTEM_SERVER_CLASS = "com.android.server.SystemServer"
     const val PHONE_WINDOW_MANAGER_CLASS = "com.android.server.policy.PhoneWindowManager"
+    const val OP_LUS_PHONE_WINDOW_MANAGER_EXT_CLASS =
+        "com.android.server.policy.PhoneWindowManagerExtImpl"
     const val OP_LUS_SPEECH_HANDLER_CLASS =
         "com.android.server.policy.PhoneWindowManagerExtImpl\$OplusSpeechHandler"
 
