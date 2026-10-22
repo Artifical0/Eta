@@ -113,7 +113,7 @@ class EtaDatabaseMigrationTest {
                 assertEquals("", database.runtimeRunDao().archivedRuns().single().run.errorCode)
                 assertEquals("旧消息", database.conversationDao().messages().single().content)
                 assertEquals(if (oauth) "xai_grok" else ProviderAuthModes.API_KEY,
-                    database.providerDao().providerById("provider-1")!!.authMode)
+                    database.providerDao().providerById("provider-1")!!.provider.authMode)
             }
         } finally {
             database.close()
