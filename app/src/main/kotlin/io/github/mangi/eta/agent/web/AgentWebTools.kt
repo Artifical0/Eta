@@ -52,7 +52,6 @@ internal class AgentWebTools(
     private fun search(args: JSONObject): JSONObject {
         val limit = args.optInt("max_results", 5)
         val query = args.getString("query")
-        PublicWebSearch.searchUrl(query, limit)
         val config = runtimeConfig()
         val page = when (config.searchBackend) {
             WebToolBackend.BUILTIN -> return searchBuiltIn(query, limit)
@@ -101,6 +100,7 @@ internal class AgentWebTools(
     }
 
     private fun searchBuiltIn(query: String, limit: Int): JSONObject {
+        PublicWebSearch.searchUrl(query, limit)
         val attempts = JSONArray()
         for (provider in PublicWebSearch.providers) {
             ensureActive()

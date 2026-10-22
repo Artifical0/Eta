@@ -171,7 +171,7 @@ class AgentWebToolsTest {
         assertEquals("WEB_CANCELLED", call(tools, "fetch_url", JSONObject().put("url", "https://example.test")).getString("code"))
     }
 
-    @Test fun deepSeekSearchSendsBearerAndReturnsSummaryMetadata() {
+    @Test fun deepSeekSearchSendsBearerAndTruncatesUnicodeQueryWithoutBuiltinUrlLimit() {
         var capturedAuth: String? = null
         var capturedPath: String? = null
         var capturedBody: JSONObject? = null
@@ -206,7 +206,7 @@ class AgentWebToolsTest {
             deepSeekBaseUrl = "https://api.deepseek.com",
             deepSeekApiKey = "sk-deepseek-test",
         )
-        val longQuery = "DeepSeek ".repeat(20)
+        val longQuery = "深度搜索".repeat(500)
         AgentWebTools(WebHttpTransport(client), runtimeConfig = { config }).use { tools ->
             val result = call(tools, "web_search", JSONObject().put("query", longQuery).put("max_results", 5))
             assertTrue(result.toString(), result.getBoolean("ok"))
