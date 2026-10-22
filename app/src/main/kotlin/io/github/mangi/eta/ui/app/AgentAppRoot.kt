@@ -173,7 +173,7 @@ fun AgentAppRoot(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    var conversationPaneOpen by remember { mutableStateOf(false) }
+    var conversationPaneOpen by rememberSaveable { mutableStateOf(false) }
     var conversationRenameTarget by remember { mutableStateOf<ConversationSummaryUi?>(null) }
     var conversationDeleteTarget by remember { mutableStateOf<ConversationSummaryUi?>(null) }
     var conversationExportTarget by remember { mutableStateOf<ConversationSummaryUi?>(null) }
@@ -396,6 +396,9 @@ fun AgentAppRoot(
                                 is AgentHomeAction.ReasoningEffortChanged ->
                                     agentState.updateReasoningEffort(action.effort)
                                 AgentHomeAction.CompactContext -> agentState.compactCurrentContext()
+                                AgentHomeAction.LoadEarlierMessages -> agentState.loadEarlierMessages()
+                                is AgentHomeAction.HistoryViewportChanged -> agentState.updateHistoryViewport(action.atLatest)
+                                AgentHomeAction.RetryConversationLoad -> agentState.retryConversationLoad()
                                 is AgentHomeAction.ModelSelected -> agentState.selectModel(action.modelId)
                                 is AgentHomeAction.PrimaryDisplayChanged -> agentState.updatePrimaryDisplay(action.primary)
                                 is AgentHomeAction.SubmitMessage -> { requestExecutionNotifications(); agentState.sendCurrentMessage(action.text) }
@@ -432,6 +435,9 @@ fun AgentAppRoot(
                                 AgentHomeAction.ExpandRunTrace -> Unit
                             }
                         },
+                        isLoadingConversation = agentState.isLoadingConversation,
+                        conversationLoadFailed = agentState.conversationLoadFailed,
+                        historyLoadState = agentState.historyLoadState,
                         isDrawerOpen = conversationPaneOpen,
                     )
                 }

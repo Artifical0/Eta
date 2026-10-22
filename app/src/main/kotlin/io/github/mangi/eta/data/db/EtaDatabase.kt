@@ -29,7 +29,7 @@ import androidx.room.migration.Migration
         AgentTaskRunEntity::class,
         LearningProposalEntity::class,
     ],
-    version = 27,
+    version = 28,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -75,6 +75,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_24_25,
                         MIGRATION_25_26,
                         MIGRATION_26_27,
+                        MIGRATION_27_28,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -110,6 +111,14 @@ internal abstract class EtaDatabase : RoomDatabase() {
         }
 
         internal val MIGRATION_23_24 = Migration(23, 24) { database ->
+            // Upstream 3.3.2 also used version 23, without the fork's timing column.
+            val hasDuration = database.query("PRAGMA table_info(conversation_messages)").use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                var found = false
+                while (cursor.moveToNext()) if (cursor.getString(nameIndex) == "request_duration_ms") found = true
+                found
+            }
+            if (!hasDuration) database.execSQL("ALTER TABLE conversation_messages ADD COLUMN request_duration_ms INTEGER")
             database.execSQL("ALTER TABLE conversations ADD COLUMN last_model_usage_json TEXT NOT NULL DEFAULT ''")
         }
 
@@ -175,6 +184,18 @@ internal abstract class EtaDatabase : RoomDatabase() {
                 if (!hasErrorCode) database.execSQL("ALTER TABLE $table ADD COLUMN error_code TEXT NOT NULL DEFAULT ''")
             }
             MIGRATION_21_22.migrate(database)
+        }
+
+        internal val MIGRATION_27_28 = Migration(27, 28) { database ->
+            val hasAuthMode = database.query("PRAGMA table_info(model_providers)").use { cursor ->
+                val nameIndex = cursor.getColumnIndexOrThrow("name")
+                var found = false
+                while (cursor.moveToNext()) if (cursor.getString(nameIndex) == "auth_mode") found = true
+                found
+            }
+            if (!hasAuthMode) {
+                database.execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
+            }
         }
 
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {
