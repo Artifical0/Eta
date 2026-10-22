@@ -27,7 +27,7 @@ gh secret set ETA_RELEASE_KEY_PASSWORD
 
 ## PR 检查
 
-指向 `main` 的 Pull Request 会触发 `PR Check`，依次执行 Lint、单元测试和 Debug 构建，
+指向 `main` 或 `virtual-screen` 的 Pull Request 会触发 `PR Check`，依次执行 Lint、单元测试和 Debug 构建，
 失败时上传检查报告。该工作流不读取任何 Secrets，来自 fork 的 PR 需要维护者在 PR 页面
 批准后才会运行，批准前请重点检查 `.github/` 下的改动。
 
@@ -37,7 +37,7 @@ gh secret set ETA_RELEASE_KEY_PASSWORD
 ## 构建与发布
 
 以下情况会在同一次工作流中生成 Debug APK 和经过签名验证的 Release APK，
-并作为两个可直接下载的 Actions Artifact 保存 14 天：
+并作为两个可直接下载的 Actions Artifact 保存 1 天：
 
 - 向 `main` 推送提交
 - 推送 `v*` 标签
@@ -57,12 +57,15 @@ Release 草稿。
 Debug APK 会先独立构建并上传；签名配置缺失或 Release 构建失败时，
 已生成的 Debug Artifact 仍可下载，工作流会继续明确报告 Release 失败。
 
-`Eta-vivo` 仓库使用独立的持久发布证书，四项 Secrets 已配置。
-本机备份位于 `~/.local/share/eta-vivo/signing/`，其中
-`eta-vivo-release.jks` 为证书，`credentials.json` 为签名参数。
-目录权限为 `0700`，文件权限为 `0600`；备份不在 Git 内。
+`Artifical0/Eta` fork 使用独立的持久发布证书，四项 Secrets 已配置。
+Windows 本机备份位于 `~/.local/share/eta-artifical0/signing/`，其中
+`eta-artifical0-release.jks` 为证书，`credentials.json` 为签名参数。
+Windows ACL 仅允许当前用户和 SYSTEM 访问；备份不在 Git 内。
 迁移或重建仓库时继续使用同一证书，并重新设置上述 Secrets。
 不要把证书、密码或备份提交到 Git，也不要每次构建重新生成证书。
+该证书与上游和 Debug 证书不同，不能直接覆盖由其他证书签名的安装。
+`virtual-screen` 分支可以通过手动运行工作流生成签名 Release APK，
+无需推送标签或发布公开的 GitHub Release。
 
 正式发布前先更新 `versionCode` 和 `versionName`，然后创建与
 `versionName` 对应的标签。`versionCode` 使用 `yyyyMMdd` 加两位当日序号，

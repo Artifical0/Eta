@@ -13,6 +13,10 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -20,6 +24,44 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WebHttpTransportTest {
+    @Test fun boundedTimeoutIsForwardedForGetAndSharedAcrossPostRedirects() {
+        val budgets = mutableListOf<Long>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            budgets += chain.call().timeout().timeoutNanos()
+            if (request.url.encodedPath == "/get") {
+                assertEquals("GET", request.method)
+            } else {
+                assertEquals("POST", request.method)
+                val body = Buffer()
+                request.body?.writeTo(body)
+                assertEquals("{\"query\":\"Eta\"}", body.readUtf8())
+            }
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1)
+                .code(if (request.url.encodedPath == "/start") 307 else 200).message("OK")
+                .apply { if (request.url.encodedPath == "/start") header("Location", "/end") }
+                .body("response".toResponseBody()).build()
+        }.build()
+        WebHttpTransport(client).use { transport ->
+            transport.get("https://example.test/get", timeoutSeconds = 8)
+            transport.request(
+                "https://example.test/start", method = "POST",
+                body = "{\"query\":\"Eta\"}".toByteArray(), timeoutSeconds = 8,
+            )
+        }
+        assertEquals(3, budgets.size)
+        assertTrue(budgets.all { it in 1..TimeUnit.SECONDS.toNanos(8) })
+        assertTrue("Redirects must consume the original deadline", budgets[2] < budgets[1])
+    }
+
+    @Test fun timeoutBoundsApplyToBothGetAndConfigurableRequests() {
+        val client = OkHttpClient.Builder().addInterceptor { error("invalid timeout cannot send traffic") }.build()
+        WebHttpTransport(client).use { transport ->
+            assertThrows(IllegalArgumentException::class.java) { transport.get("https://example.test", timeoutSeconds = 0) }
+            assertThrows(IllegalArgumentException::class.java) { transport.request("https://example.test", timeoutSeconds = 31) }
+        }
+    }
+
     @Test fun redirectsResolveRelativeUrlsWithoutSharingCookies() {
         WebFixtureServer { path ->
             if (path == "/start") WebFixtureResponse(302, headers = mapOf("Location" to "/article", "Set-Cookie" to "secret=hidden"))
