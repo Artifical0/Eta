@@ -27,10 +27,21 @@ internal data class AgentChatUiState(
     val roleplay: RoleplayBinding? = null,
     val roleplayMessages: RoleplayMessageState = RoleplayMessageState(),
     val lastModelUsage: TokenUsageUi? = null,
+    /** 窗口外但参与正文修订的同批消息原文；仅按需加载，不写入会话元数据。 */
+    val roleplayOriginalContents: Map<String, String> = emptyMap(),
     /** 会话最近一次发送使用的本地 Model.id；null 表示尚未绑定，跟随默认模型。 */
     val modelId: String? = null,
     /** 本会话的 UI 操作改用主屏；false 跟随虚拟屏设置。 */
     val primaryDisplay: Boolean = false,
+    /** 未打开的会话仅保留侧栏预览，不能把占位状态写回消息和上下文。 */
+    val isConversationLoaded: Boolean = true,
+    /** 旧外部归档的用户上下文已修复，首次保存不能把修复后的状态当成数据库基线。 */
+    val conversationHistoryRepaired: Boolean = false,
+    /** 当前展示窗口首条消息的持久化 sort_index，保存只更新这一位置之后的后缀。 */
+    val messageStartIndex: Int = 0,
+    val hasEarlierMessages: Boolean = false,
+    val conversationCharacterName: String? = null,
+    val conversationCharacterAvatarPath: String? = null,
 ) {
     val canCompactContext: Boolean get() = !isStreaming && messageEdit == null && history.any {
         !it.contextSummary && (it.role == "assistant" || it.role == "tool")

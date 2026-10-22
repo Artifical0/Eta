@@ -1,6 +1,5 @@
 package io.github.mangi.eta.ui
 
-import io.github.mangi.eta.ui.voice.ACTION_SPEECH_SETTINGS
 import android.app.UiModeManager
 import android.content.Intent
 import android.os.Bundle
@@ -19,23 +18,18 @@ import io.github.mangi.eta.agent.voice.EtaAssistantOverlayService
 import io.github.mangi.eta.agent.display.VirtualScreenSession
 import io.github.mangi.eta.agent.display.VirtualScreenViewerActivity
 import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
+import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.data.model.AppearanceThemeMode
 import io.github.mangi.eta.data.repository.AppearanceSettingsRepository
 import io.github.mangi.eta.ui.app.AgentAppRoot
-import io.github.mangi.eta.ui.app.ArchivedConversationRequest
 import io.github.mangi.eta.ui.app.AgentAppTheme
 import io.github.mangi.eta.ui.app.PredictiveBackController
 import io.github.mangi.eta.ui.app.installStartupSplash
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private var assistantConversationKey by mutableStateOf<String?>(null)
-    private var assistantConversationSource by mutableStateOf(AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE)
-    private var requestedConversationId by mutableStateOf<String?>(null)
-    private var requestedArchivedConversation by mutableStateOf<ArchivedConversationRequest?>(null)
+    private var launchRequests by mutableStateOf(MainActivityLaunchRequests())
     private var appliedPredictiveBackEnabled = true
-    private var speechSettingsRequested by mutableStateOf(false)
-    private var terminalRequested by mutableStateOf(false)
 
     override fun onStart() {
         super.onStart()
@@ -49,10 +43,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AndroidAgentLogger.info("Agent UI created: task=$taskId restored=${savedInstanceState != null}")
         var contentReady = false
         installStartupSplash { contentReady }
         enableEdgeToEdge()
-        updateAssistantHandoff(intent)
+        launchRequests = MainActivityLaunchRequests.restore(savedInstanceState, intent)
+        if (savedInstanceState == null) openExecutionViewer(intent)
         lifecycleScope.launch {
             val initialAppearance = AppearanceSettingsRepository.settings()
             appliedPredictiveBackEnabled = initialAppearance.predictiveBackEnabled
@@ -80,19 +76,32 @@ class MainActivity : ComponentActivity() {
                     onResolvedDarkModeChange = ::updateSystemBars,
                 ) {
                     AgentAppRoot(
-                        assistantConversationKey = assistantConversationKey,
-                        assistantConversationSource = assistantConversationSource,
-                        requestedConversationId = requestedConversationId,
-                        onRequestedConversationOpened = { requestedConversationId = null; intent?.action = null },
-                        requestedArchivedConversation = requestedArchivedConversation,
-                        onArchivedConversationOpened = { requestedArchivedConversation = null; intent?.action = null },
-                        openSpeechSettings = speechSettingsRequested,
-                        openTerminal = terminalRequested,
-                        onTerminalOpened = { terminalRequested = false; intent?.action = null },
-                        onSpeechSettingsOpened = { speechSettingsRequested = false; intent?.action = null },
+                        assistantConversationKey = launchRequests.assistantConversationKey,
+                        assistantConversationSource = launchRequests.assistantConversationSource,
+                        requestedConversationId = launchRequests.conversationId,
+                        onRequestedConversationOpened = {
+                            launchRequests = launchRequests.copy(conversationId = null)
+                            intent?.action = null
+                        },
+                        requestedArchivedConversation = launchRequests.archivedConversation,
+                        onArchivedConversationOpened = {
+                            launchRequests = launchRequests.copy(archivedConversation = null)
+                            intent?.action = null
+                        },
+                        openSpeechSettings = launchRequests.speechSettings,
+                        openTerminal = launchRequests.terminal,
+                        onTerminalOpened = {
+                            launchRequests = launchRequests.copy(terminal = false)
+                            intent?.action = null
+                        },
+                        onSpeechSettingsOpened = {
+                            launchRequests = launchRequests.copy(speechSettings = false)
+                            intent?.action = null
+                        },
                         onAssistantConversationOpened = { opened ->
-                            assistantConversationKey = null
-                            if (opened && assistantConversationSource == AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE) {
+                            launchRequests = launchRequests.copy(assistantConversationKey = null)
+                            intent?.action = null
+                            if (opened && launchRequests.assistantConversationSource == AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE) {
                                 EtaAssistantOverlayService.notifyHandoffReady(this@MainActivity)
                             }
                         },
@@ -106,53 +115,29 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        val fromLauncher = intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER)
+        AndroidAgentLogger.info("Agent UI new intent: task=$taskId launcher=$fromLauncher")
         setIntent(intent)
-        updateAssistantHandoff(intent)
+        launchRequests = launchRequests.accept(intent)
+        openExecutionViewer(intent)
     }
 
-    private fun updateAssistantHandoff(intent: Intent?) {
-        if (intent?.action == ACTION_OPEN_TERMINAL) {
-            terminalRequested = true
-            return
+    private fun openExecutionViewer(intent: Intent?) {
+        if (intent?.action == ACTION_VIEW_EXECUTION && VirtualScreenSession.isActive()) {
+            startActivity(Intent(this, VirtualScreenViewerActivity::class.java))
         }
-        if (intent?.action == ACTION_VIEW_EXECUTION) {
-            assistantConversationSource = intent.getStringExtra(EXTRA_EXECUTION_SOURCE)
-                ?.takeIf { it in setOf(
-                    AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE,
-                    AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE, "automation",
-                ) } ?: AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE
-            assistantConversationKey = intent.getStringExtra(
-                EtaAssistantOverlayService.EXTRA_CONVERSATION_KEY,
-            )?.takeIf(String::isNotBlank)
-            intent.action = null
-            if (VirtualScreenSession.isActive()) {
-                startActivity(Intent(this, VirtualScreenViewerActivity::class.java))
-            }
-            return
-        }
-        if (intent?.action == ACTION_SPEECH_SETTINGS) {
-            speechSettingsRequested = true
-            return
-        }
-        if (intent?.action == ACTION_OPEN_CONVERSATION_ID) {
-            requestedConversationId = intent.getStringExtra(EXTRA_CONVERSATION_ID)?.takeIf(String::isNotBlank)
-            return
-        }
-        if (intent?.action == ACTION_OPEN_ARCHIVED_CONVERSATION) {
-            val source = intent.getStringExtra(EXTRA_HANDOFF_SOURCE)?.takeIf(String::isNotBlank)
-            val key = intent.getStringExtra(EXTRA_CONVERSATION_KEY)?.takeIf(String::isNotBlank)
-            requestedArchivedConversation = if (source != null && key != null) {
-                ArchivedConversationRequest(source, key)
-            } else {
-                null
-            }
-            return
-        }
-        if (intent?.action != EtaAssistantOverlayService.ACTION_OPEN_CONVERSATION) return
-        assistantConversationSource = AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE
-        assistantConversationKey = intent.getStringExtra(
-            EtaAssistantOverlayService.EXTRA_CONVERSATION_KEY,
-        )?.takeIf(String::isNotBlank)
+    }
+
+    override fun onDestroy() {
+        AndroidAgentLogger.info(
+            "Agent UI destroyed: task=$taskId changing_configuration=$isChangingConfigurations finishing=$isFinishing",
+        )
+        super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        launchRequests.saveTo(outState)
+        super.onSaveInstanceState(outState)
     }
 
     private fun updateApplicationNightMode(themeMode: AppearanceThemeMode) {

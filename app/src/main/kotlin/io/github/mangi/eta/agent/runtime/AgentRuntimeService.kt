@@ -341,7 +341,15 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     request
                 } else {
                     val runtimeConfig = runBlocking {
-                        RuntimeConfigRepository.currentRuntimeConfig()
+                        if (AgentRuntimeRequestConfigResolver.usesDefaultRuntimeConfig(request)) {
+                            RuntimeConfigRepository.currentRuntimeConfig()
+                        } else {
+                            RuntimeConfigRepository.oauthRuntimeConfigFor(
+                                providerId = request.config.providerId,
+                                authMode = request.config.authMode,
+                                modelName = request.config.model,
+                            )
+                        }
                     } ?: throw RuntimeConfigUnavailableException()
                     AgentRuntimeRequestConfigResolver.applyRuntimeConfig(request, runtimeConfig)
                 }
@@ -1327,6 +1335,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun dismissAndStop() {
+        // A bound service may remain alive after stopSelf; release completed conversation context.
+        lastCompletedRunContext = null
         removeOverlayWindows()
         stopSelf()
     }

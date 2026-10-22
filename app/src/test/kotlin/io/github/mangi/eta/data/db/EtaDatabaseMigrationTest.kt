@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import io.github.mangi.eta.data.model.ModelSource
+import io.github.mangi.eta.data.model.ProviderAuthModes
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -24,13 +25,23 @@ class EtaDatabaseMigrationTest {
     fun upstream22MigrationPreservesModelBindingAndAddsForkTables() = verifyForkMergeMigration(upstream = true)
 
     @Test
+    fun upstream23MigrationPreservesSubscriptionModeAndAddsForkTables() =
+        verifyForkMergeMigration(upstream = true, oauth = true)
+
+    @Test
+    fun fork27MigrationAddsApiKeyModeWithoutLosingTasksOrUsage() =
+        verifyForkMergeMigration(upstream = false, latestFork = true)
+
+    @Test
     fun fork25MigrationPreservesUsageAndErrorsAndAddsModelBinding() = verifyForkMergeMigration(upstream = false)
 
     @Test
     fun contribution25MigrationPreservesModelTasksAndUsageWhileAddingRuntimeErrors() =
         verifyForkMergeMigration(upstream = false, contribution = true)
 
-    private fun verifyForkMergeMigration(upstream: Boolean, contribution: Boolean = false) {
+    private fun verifyForkMergeMigration(
+        upstream: Boolean, contribution: Boolean = false, oauth: Boolean = false, latestFork: Boolean = false,
+    ) {
         val context = RuntimeEnvironment.getApplication() as Context
         val name = "merge-migration-${UUID.randomUUID()}.db"
         createVersion6Database(context, name)
@@ -55,6 +66,11 @@ class EtaDatabaseMigrationTest {
                 db.execSQL("ALTER TABLE conversations ADD COLUMN model_id TEXT")
                 db.execSQL("UPDATE conversations SET model_id='kept-model' WHERE id='conv-1'")
                 db.version = 22
+                if (oauth) {
+                    db.execSQL("ALTER TABLE model_providers ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'api_key'")
+                    db.execSQL("UPDATE model_providers SET auth_mode='xai_grok' WHERE id='provider-1'")
+                    db.version = 23
+                }
             } else {
                 listOf(EtaDatabase.MIGRATION_21_22, EtaDatabase.MIGRATION_22_23,
                     EtaDatabase.MIGRATION_23_24, EtaDatabase.MIGRATION_24_25).forEach { it.migrate(db) }
@@ -70,13 +86,19 @@ class EtaDatabaseMigrationTest {
                     db.execSQL("ALTER TABLE runtime_archive_runs DROP COLUMN error_code")
                 }
                 db.version = 25
+                if (latestFork) {
+                    EtaDatabase.MIGRATION_25_26.migrate(db)
+                    EtaDatabase.MIGRATION_26_27.migrate(db)
+                    db.version = 27
+                }
             }
         } finally {
             helper.close()
         }
         val database = Room.databaseBuilder(context, EtaDatabase::class.java, name)
             .addMigrations(EtaDatabase.MIGRATION_22_23, EtaDatabase.MIGRATION_23_24,
-                EtaDatabase.MIGRATION_24_25, EtaDatabase.MIGRATION_25_26, EtaDatabase.MIGRATION_26_27).build()
+                EtaDatabase.MIGRATION_24_25, EtaDatabase.MIGRATION_25_26, EtaDatabase.MIGRATION_26_27,
+                EtaDatabase.MIGRATION_27_28).build()
         try {
             runBlocking(Dispatchers.IO) {
                 val conversation = database.conversationDao().conversations().first { it.id == "conv-1" }
@@ -90,6 +112,8 @@ class EtaDatabaseMigrationTest {
                 if (!upstream) assertEquals(2, tasks.single().runCount)
                 assertEquals("", database.runtimeRunDao().archivedRuns().single().run.errorCode)
                 assertEquals("旧消息", database.conversationDao().messages().single().content)
+                assertEquals(if (oauth) "xai_grok" else ProviderAuthModes.API_KEY,
+                    database.providerDao().providerById("provider-1")!!.provider.authMode)
             }
         } finally {
             database.close()
@@ -98,7 +122,7 @@ class EtaDatabaseMigrationTest {
     }
 
     @Test
-    fun migration6To27PreservesDataAndMovesCompleteConversationContext() {
+    fun migration6To28PreservesDataAndMovesCompleteConversationContext() {
         val context = RuntimeEnvironment.getApplication() as Context
         val databaseName = "migration-${UUID.randomUUID()}.db"
         createVersion6Database(context, databaseName)
@@ -137,6 +161,7 @@ class EtaDatabaseMigrationTest {
                 EtaDatabase.MIGRATION_24_25,
                 EtaDatabase.MIGRATION_25_26,
                 EtaDatabase.MIGRATION_26_27,
+                EtaDatabase.MIGRATION_27_28,
             )
             .build()
         try {
@@ -204,6 +229,8 @@ class EtaDatabaseMigrationTest {
             assertEquals(null, runBlocking(Dispatchers.IO) { database.conversationDao().state() })
             assertEquals(listOf("built-in", "manual"), provider.models.map { it.modelId })
             assertEquals(false, provider.hostedWebSearchEnabled)
+            assertEquals(ProviderAuthModes.API_KEY, provider.authMode)
+            assertEquals("fixture-existing-api-key", provider.apiKey)
             assertEquals(false, migratedMessage.isEdited)
             assertEquals(emptyList<RuntimeInFlightRunWithEvents>(), inFlightRuns)
             assertEquals(listOf("mcp-1"), mcpServers.map { it.id })
@@ -279,7 +306,7 @@ class EtaDatabaseMigrationTest {
                             "INSERT INTO model_providers " +
                                 "(id, type, name, base_url, api_key, is_enabled, is_built_in, sort_order, " +
                                 "system_prompt, custom_headers_json, custom_body_json, created_at, endpoint_mode, anthropic_version) " +
-                                "VALUES ('provider-1', 'openai_compatible', 'Provider', 'https://example.com/v1', '', 1, 0, 0, " +
+                                "VALUES ('provider-1', 'openai_compatible', 'Provider', 'https://example.com/v1', 'fixture-existing-api-key', 1, 0, 0, " +
                                 "NULL, '[]', '[]', 1, 'chat_completions', '2023-06-01')"
                         )
                         db.execSQL(providerModelInsert("built-in-id", "built-in", 1, 0))
