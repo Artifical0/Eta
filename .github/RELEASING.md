@@ -2,12 +2,12 @@
 
 ## Fork 开发测试约定
 
-`Artifical0/Eta` 的编译、单元测试、Lint 和 APK 打包统一在 GitHub Actions 执行；默认不在本机运行 Gradle。开发时将改动提交并推送到自己的功能分支，再手动触发云端构建：
+`ByteJuno/Eta` 的编译、单元测试、Lint 和 APK 打包统一在 GitHub Actions 执行；默认不在本机运行 Gradle。开发时将改动提交并推送到自己的功能分支，再手动触发云端构建：
 
 ```bash
 git push -u origin <功能分支>
-gh workflow run android-release.yml --repo Artifical0/Eta --ref <功能分支>
-gh run list --repo Artifical0/Eta --workflow android-release.yml --branch <功能分支>
+gh workflow run android-release.yml --repo ByteJuno/Eta --ref <功能分支>
+gh run list --repo ByteJuno/Eta --workflow android-release.yml --branch <功能分支>
 ```
 
 确认运行的提交号与推送提交一致，并检查 Lint、完整单元测试、Debug 与签名 Release 构建结果。测试安装包从该次运行的 Artifacts 下载。功能分支不需要推送标签或公开发布 Release。用户完成真机验收并确认后，再整理上游 PR。
@@ -69,7 +69,7 @@ Release 草稿。
 Debug APK 会先独立构建并上传；签名配置缺失或 Release 构建失败时，
 已生成的 Debug Artifact 仍可下载，工作流会继续明确报告 Release 失败。
 
-`Artifical0/Eta` fork 使用独立的持久发布证书，四项 Secrets 已配置。
+`ByteJuno/Eta` fork 使用独立的持久发布证书，四项 Secrets 已配置。
 Windows 本机备份位于 `~/.local/share/eta-artifical0/signing/`，其中
 `eta-artifical0-release.jks` 为证书，`credentials.json` 为签名参数。
 Windows ACL 仅允许当前用户和 SYSTEM 访问；备份不在 Git 内。
