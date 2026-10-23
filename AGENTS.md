@@ -12,6 +12,8 @@ Eta is a single-module Android assistant built with Kotlin and Jetpack Compose.
 
 ## Build, Test, and Development Commands
 
+For the `Artifical0/Eta` fork, run compilation, unit tests, Lint, and APK packaging in GitHub Actions. Do not run Gradle locally unless the user explicitly requests local execution. Push the feature branch to `origin`, dispatch `Eta Build` on that branch, and verify the workflow commit and signed APK artifact before delivery. See `.github/RELEASING.md` for commands. Keep upstream pull requests pending until the user completes device testing and authorizes submission.
+
 Use JDK 25 and Android SDK 37 (`platforms;android-37.0`); configure `sdk.dir` in ignored `local.properties`. Run commands from the repository root:
 
 - `./gradlew :app:assembleDebug`: build `app/build/outputs/apk/debug/Eta-v<version>-debug.apk`.

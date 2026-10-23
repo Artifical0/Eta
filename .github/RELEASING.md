@@ -1,5 +1,17 @@
 # Eta 发布流程
 
+## Fork 开发测试约定
+
+`Artifical0/Eta` 的编译、单元测试、Lint 和 APK 打包统一在 GitHub Actions 执行；默认不在本机运行 Gradle。开发时将改动提交并推送到自己的功能分支，再手动触发云端构建：
+
+```bash
+git push -u origin <功能分支>
+gh workflow run android-release.yml --repo Artifical0/Eta --ref <功能分支>
+gh run list --repo Artifical0/Eta --workflow android-release.yml --branch <功能分支>
+```
+
+确认运行的提交号与推送提交一致，并检查 Lint、完整单元测试、Debug 与签名 Release 构建结果。测试安装包从该次运行的 Artifacts 下载。功能分支不需要推送标签或公开发布 Release。用户完成真机验收并确认后，再整理上游 PR。
+
 ## 配置签名 Secrets
 
 发布证书和密码不得提交到 Git。首次使用前，在仓库的
