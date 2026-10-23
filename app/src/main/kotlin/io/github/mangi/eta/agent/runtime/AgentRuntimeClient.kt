@@ -35,6 +35,11 @@ internal class AgentRuntimeClient(
         data object Unavailable : ActiveRunQuery
     }
 
+    sealed interface ActiveRunsQuery {
+        data class Known(val runIds: List<String>) : ActiveRunsQuery
+        data object Unavailable : ActiveRunsQuery
+    }
+
     sealed interface CompletedRunsQuery {
         data class Known(val runs: List<AgentRuntimeWire.CompletedRun>) : CompletedRunsQuery
         data object Unavailable : CompletedRunsQuery
@@ -213,24 +218,29 @@ internal class AgentRuntimeClient(
         }
     }
 
-    fun queryActiveRun(): ActiveRunQuery {
+    fun queryActiveRun(): ActiveRunQuery = when (val query = queryActiveRuns()) {
+        is ActiveRunsQuery.Known -> ActiveRunQuery.Known(query.runIds.firstOrNull())
+        ActiveRunsQuery.Unavailable -> ActiveRunQuery.Unavailable
+    }
+
+    fun queryActiveRuns(): ActiveRunsQuery {
         val responseLatch = CountDownLatch(1)
-        val runIdRef = AtomicReference("")
+        val runIdsRef = AtomicReference<List<String>>(emptyList())
         val clientMessenger = Messenger(
-            ActiveRunHandler { runId ->
-                runIdRef.set(runId)
+            ActiveRunHandler { runIds ->
+                runIdsRef.set(runIds)
                 responseLatch.countDown()
             }
         )
 
-        return withRuntimeMessenger<ActiveRunQuery>(ActiveRunQuery.Unavailable) { serviceMessenger ->
+        return withRuntimeMessenger<ActiveRunsQuery>(ActiveRunsQuery.Unavailable) { serviceMessenger ->
             val msg = Message.obtain(null, AgentRuntimeWire.MSG_QUERY_ACTIVE_RUN)
             msg.replyTo = clientMessenger
             serviceMessenger.send(msg)
             if (!responseLatch.await(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                ActiveRunQuery.Unavailable
+                ActiveRunsQuery.Unavailable
             } else {
-                ActiveRunQuery.Known(runIdRef.get().takeIf(String::isNotBlank))
+                ActiveRunsQuery.Known(runIdsRef.get())
             }
         }
     }
@@ -348,11 +358,11 @@ internal class AgentRuntimeClient(
     }
 
     private class ActiveRunHandler(
-        private val onResponse: (String) -> Unit,
+        private val onResponse: (List<String>) -> Unit,
     ) : Handler(Looper.getMainLooper()) {
         override fun handleMessage(msg: Message) {
             if (msg.what == AgentRuntimeWire.MSG_QUERY_ACTIVE_RUN_RESPONSE) {
-                onResponse(AgentRuntimeWire.runIdFromBundle(msg.data ?: return))
+                onResponse(AgentRuntimeWire.activeRunIdsFromBundle(msg.data ?: return))
             }
         }
     }

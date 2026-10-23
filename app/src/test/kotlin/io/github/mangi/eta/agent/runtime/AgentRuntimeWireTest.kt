@@ -30,6 +30,21 @@ import org.robolectric.annotation.Config
 @Config(sdk = [33, 36], application = android.app.Application::class)
 class AgentRuntimeWireTest {
     @Test
+    fun activeRunsRoundTripAndKeepLegacyRepresentative() {
+        val bundle = AgentRuntimeWire.activeRunsBundle(listOf("run-a", "run-b", "run-a", " "))
+        assertEquals(listOf("run-a", "run-b"), AgentRuntimeWire.activeRunIdsFromBundle(bundle))
+        assertEquals("run-a", AgentRuntimeWire.runIdFromBundle(bundle))
+    }
+
+    @Test
+    fun activeRunsReadLegacyServicesAndExplicitEmptyLists() {
+        assertEquals(listOf("legacy"), AgentRuntimeWire.activeRunIdsFromBundle(AgentRuntimeWire.ackBundle("legacy")))
+        assertEquals(emptyList<String>(), AgentRuntimeWire.activeRunIdsFromBundle(AgentRuntimeWire.ackBundle("")))
+        val empty = AgentRuntimeWire.activeRunsBundle(emptyList()).apply { putString("run_id", "stale") }
+        assertEquals(emptyList<String>(), AgentRuntimeWire.activeRunIdsFromBundle(empty))
+    }
+
+    @Test
     fun queuedSupplementKeepsDeliveryModeAcrossIpc() {
         val event = AgentEvent.UserSupplementReceived(5, "next round", queued = true)
         assertEquals(event, AgentRuntimeWire.eventFromBundle(AgentRuntimeWire.eventToBundle(event)))

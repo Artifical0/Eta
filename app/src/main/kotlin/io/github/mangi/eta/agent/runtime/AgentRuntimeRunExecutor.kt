@@ -55,6 +55,7 @@ internal class AgentRuntimeRunExecutor(
         List<AgentEvent>,
     ) -> Unit,
     private val reviewGeneration: Long? = null,
+    private val onInteractionAcquired: () -> Unit = {},
 ) {
     data class Outcome(
         val result: AgentRuntimeWire.RunResult,
@@ -173,6 +174,9 @@ internal class AgentRuntimeRunExecutor(
                 virtualScreenOwner = request.virtualScreenOwner,
                 primaryDisplay = session.primaryDisplay.get(),
                 isRunCancelled = { runController.isCancelled },
+                isRunPaused = { runController.isPaused },
+                hasPendingSteering = { runController.hasPendingSteering },
+                onInteractionAcquired = onInteractionAcquired,
                 browserToolsEnabled = {
                     request.config.browserTools && currentPermissions().browserTools
                 },

@@ -59,15 +59,6 @@ internal class AgentTaskJobService : JobService() {
                         ); return@runBlocking
                     }
                     val client = AgentRuntimeClient(this@AgentTaskJobService, AndroidAgentLogger)
-                    when (val active = client.queryActiveRun()) {
-                        is AgentRuntimeClient.ActiveRunQuery.Known -> if (active.runId != null) {
-                            deferred = true; return@runBlocking
-                        }
-
-                        AgentRuntimeClient.ActiveRunQuery.Unavailable -> {
-                            deferred = true; return@runBlocking
-                        }
-                    }
                     val config = RuntimeConfigRepository.currentRuntimeConfig()
                     if (config == null || config.apiKey.isBlank()) {
                         dao.complete(
