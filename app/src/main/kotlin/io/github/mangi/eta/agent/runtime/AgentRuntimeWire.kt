@@ -80,10 +80,10 @@ internal object AgentRuntimeWire {
     /** service -> client：请求图片已经摄取，入口进程可以关闭文件描述符并删除临时文件。 */
     const val MSG_REQUEST_INGESTED = 8
 
-    /** client -> service：查询当前仍在执行或提交终态的 run。 */
+    /** client -> service：查询仍在准备、执行或提交终态的 runs。 */
     const val MSG_QUERY_ACTIVE_RUN = 9
 
-    /** service -> client：返回当前 active runId；空字符串表示没有。 */
+    /** service -> client：返回 active runIds，并保留旧客户端使用的单个 runId。 */
     const val MSG_QUERY_ACTIVE_RUN_RESPONSE = 10
 
     /** client -> service：重新订阅指定 run 的安全事件重放、实时事件和最终结果。 */
@@ -619,6 +619,21 @@ internal object AgentRuntimeWire {
     fun ackBundle(runId: String): Bundle = Bundle().apply {
         putString(KEY_RUN_ID, runId)
     }
+
+    fun activeRunsBundle(runIds: List<String>): Bundle {
+        val ids = runIds.filter(String::isNotBlank).distinct()
+        return ackBundle(ids.firstOrNull().orEmpty()).apply {
+            putStringArrayList("run_ids", ArrayList(ids))
+        }
+    }
+
+    /** 新客户端也能连接升级前只返回 run_id 的服务。 */
+    fun activeRunIdsFromBundle(bundle: Bundle): List<String> =
+        if (bundle.containsKey("run_ids")) {
+            bundle.getStringArrayList("run_ids").orEmpty().filter(String::isNotBlank).distinct()
+        } else {
+            listOfNotNull(runIdFromBundle(bundle).takeIf(String::isNotBlank))
+        }
 
     fun attachRunResponseBundle(runId: String, attached: Boolean): Bundle = Bundle().apply {
         putString(KEY_RUN_ID, runId)

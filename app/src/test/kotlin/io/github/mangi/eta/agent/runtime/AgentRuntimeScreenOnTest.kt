@@ -20,7 +20,7 @@ class AgentRuntimeScreenOnTest {
             val service = serviceController.get()
             val session = AgentRuntimeSession("active-run")
             val capsule = ComposeView(service)
-            service.setField("activeSession", session)
+            service.registerTestRun(session)
             service.setField("capsuleView", capsule)
 
             service.invoke("updateKeepScreenOn")
@@ -54,7 +54,7 @@ class AgentRuntimeScreenOnTest {
         try {
             val service = serviceController.get()
             val session = AgentRuntimeSession("completed-run")
-            service.setField("activeSession", session)
+            service.registerTestRun(session)
             service.invoke("updateKeepScreenOn")
             assertTrue(AgentRuntimeService.keepScreenOn.value)
 
@@ -74,7 +74,7 @@ class AgentRuntimeScreenOnTest {
         val serviceController = Robolectric.buildService(AgentRuntimeService::class.java).create()
         try {
             val service = serviceController.get()
-            service.setField("activeSession", AgentRuntimeSession("destroyed-run"))
+            service.registerTestRun(AgentRuntimeSession("destroyed-run"))
             service.invoke("updateKeepScreenOn")
             assertTrue(AgentRuntimeService.keepScreenOn.value)
         } finally {

@@ -90,14 +90,41 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
 
     @Volatile
     private var activeSession: AgentRuntimeSession? = null
-    private var startRequestGeneration = 0L
-    private var pendingStartRequest: PendingStartRequest? = null
+    private val runs = AgentRuntimeRunRegistry<PendingStartRequest, RuntimeRun>()
 
     private data class PendingStartRequest(
-        val generation: Long,
         val incoming: AgentRuntimeWire.IncomingRunRequest,
         val replyTo: Messenger?,
-    )
+    ) {
+        val subscribers = mutableListOf<Messenger>().apply { replyTo?.let(::add) }
+
+        fun subscribe(target: Messenger?) {
+            if (target != null && subscribers.none { it.binder == target.binder }) subscribers += target
+        }
+    }
+
+    private class RuntimeRun(
+        val request: AgentRuntimeWire.RunRequest,
+        val session: AgentRuntimeSession,
+    ) {
+        var overlayState = AgentOverlayState.Initial
+        var hasExecutedForegroundTool = false
+        var hasInteractionLease = false
+        var revealAfterInteraction = false
+        var foregroundToolStarted = false
+        @Volatile var terminalResult: AgentRuntimeWire.RunResult? = null
+        val supplementsLock = Any()
+        val supplements = mutableListOf<AgentUiHandoffPayload.Supplement>()
+        var nextSupplementIndex = 1
+
+        init {
+            request.handoff?.takeIf { it.source == AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE }?.let {
+                val payload = AgentUiHandoffPayload.from(it.payload)
+                supplements += payload.supplements
+                nextSupplementIndex = payload.lastSupplementIndex + 1
+            }
+        }
+    }
 
     private var windowManager: WindowManager? = null
     private var glowView: ComposeView? = null
@@ -115,6 +142,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             get() = holder.value
             set(next) {
                 holder.value = next
+                activeSession?.let { runs.active(it.runId)?.overlayState = next }
                 AgentExecutionService.updateRunStatus(
                     this@AgentRuntimeService,
                     next.status.takeIf { activeSession?.isTerminal == false },
@@ -154,9 +182,6 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
      */
     private var resultConversationId: String? = null
     private var resultArchive: Pair<String, String>? = null
-    private val supplementsLock = Any()
-    private val activeSupplements = mutableListOf<AgentUiHandoffPayload.Supplement>()
-    private var nextSupplementIndex = 1
     @Volatile
     private var lastCompletedRunContext: CompletedRunContext? = null
     private val hideToken = Any()
@@ -176,14 +201,14 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action != ACTION_KEEP_ALIVE || activeSession == null) {
+        if (intent?.action != ACTION_KEEP_ALIVE || runs.isEmpty()) {
             stopSelf(startId)
         }
         return START_NOT_STICKY
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        if (activeSession?.isTerminal == false) {
+        if (!runs.isEmpty()) {
             AndroidAgentLogger.debug {
                 "Agent runtime client unbound while run is active; detached run continues"
             }
@@ -194,24 +219,24 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     override fun onDestroy() {
         // 经验复盘由自己的执行引用持有；文字任务关闭入口服务后仍可完成。
         setKeepScreenOn(false)
-        startRequestGeneration++
-        pendingStartRequest?.let { pending ->
+        runs.pendingValues().forEach { pending ->
+            runs.removePending(pending.incoming.request.runId, pending)
             pending.incoming.close()
-            sendRequestIngestedTo(pending.replyTo, pending.incoming.request.runId)
-            sendResultTo(
-                pending.replyTo,
-                AgentRuntimeWire.RunResult(
-                    runId = pending.incoming.request.runId,
-                    ok = false,
-                    content = "",
+            pending.subscribers.forEach { target ->
+                sendRequestIngestedTo(target, pending.incoming.request.runId)
+                sendResultTo(target, AgentRuntimeWire.RunResult(
+                    runId = pending.incoming.request.runId, ok = false, content = "",
                     error = "Agent Runtime 服务已停止",
-                ),
-            )
+                ))
+            }
         }
-        pendingStartRequest = null
-        activeSession?.cancel("Agent Runtime 服务已停止")
+        runs.activeValues().forEach { run ->
+            run.session.cancel("Agent Runtime 服务已停止")
+            runs.removeActive(run.session.runId, run)
+        }
         activeSession = null
-        resultIo.shutdownNow()
+        // Deliver cancellation messages already queued above before retiring the worker.
+        resultIo.shutdown()
         mainHandler.removeCallbacksAndMessages(null)
         AgentOverlayClearance.detach(clearanceHost)
         unregisterResultCardBack()
@@ -272,8 +297,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     val text = msg.data.getString("supplement_text").orEmpty()
                     val valid = runCatching { AgentRuntimeWire.steerBundle(runId, text) }.isSuccess
                     val accepted = valid && if (msg.data.getBoolean("queued")) {
-                        val current = activeSession?.takeIf { it.runId == runId && pendingStartRequest == null }
-                        current?.enqueue(text) { recordSupplementEvent(text, queued = true) } != null
+                        val current = runs.active(runId)
+                        current?.session?.enqueue(text) { recordSupplementEvent(current, text, queued = true) } != null
                     } else requestSupplement(text, expectedRunId = runId)
                     runCatching {
                         msg.replyTo?.send(Message.obtain(null, AgentRuntimeWire.MSG_STEER_RESPONSE).apply {
@@ -321,22 +346,44 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         incoming: AgentRuntimeWire.IncomingRunRequest,
         replyTo: Messenger?,
     ) {
-        val generation = ++startRequestGeneration
-        pendingStartRequest?.let { previous ->
-            previous.incoming.close()
-            sendRequestIngestedTo(previous.replyTo, previous.incoming.request.runId)
-            sendResultTo(
-                previous.replyTo,
-                AgentRuntimeWire.RunResult(
-                    runId = previous.incoming.request.runId,
-                    ok = false,
-                    content = "",
-                    error = "已被新的 Agent 任务替换",
-                ),
-            )
+        val pending = PendingStartRequest(incoming, replyTo)
+        // Session event sinks read the registry while holding their own lock. Take terminal
+        // snapshots outside the registry monitor to keep that lock order one-way.
+        val busyRuns = runs.activeValues().filterNot { it.session.isTerminal }.toSet()
+        when (runs.reserve(incoming.request.runId, incoming.request.effectiveModelSessionId, pending) { it in busyRuns }) {
+            AgentRuntimeRunRegistry.Admission.DUPLICATE_RUN -> {
+                incoming.close()
+                pending.subscribers.forEach { sendRequestIngestedTo(it, incoming.request.runId) }
+                // A retry must not publish a second terminal result for the live run.
+                val existingPending = runs.pending(incoming.request.runId)
+                if (existingPending != null) existingPending.subscribe(replyTo)
+                else {
+                    val existing = runs.active(incoming.request.runId)
+                    if (existing != null && !attachRun(incoming.request.runId, replyTo)) {
+                        sendResultTo(replyTo, existing.terminalResult ?: AgentRuntimeWire.RunResult(
+                            runId = incoming.request.runId, ok = false, content = "",
+                            error = "此任务已结束，请重新打开会话恢复结果",
+                            contextSnapshotRef = incoming.request.runId,
+                            operation = incoming.request.operation,
+                        ))
+                    }
+                }
+                return
+            }
+            AgentRuntimeRunRegistry.Admission.CONVERSATION_BUSY -> {
+                incoming.close()
+                pending.subscribers.forEach { sendRequestIngestedTo(it, incoming.request.runId) }
+                sendResultTo(replyTo, AgentRuntimeWire.RunResult(
+                    runId = incoming.request.runId, ok = false, content = "",
+                    error = "此会话已有任务正在执行，请等待完成或先停止该任务",
+                    errorCode = "CONVERSATION_RUNTIME_BUSY",
+                    operation = incoming.request.operation,
+                ))
+                return
+            }
+            AgentRuntimeRunRegistry.Admission.ACCEPTED -> Unit
         }
-        val pending = PendingStartRequest(generation, incoming, replyTo)
-        pendingStartRequest = pending
+        holdRuntimeService()
         thread(name = "agent-runtime-image-ingest") {
             val prepared = runCatching {
                 val request = AgentRuntimeImageTransfer.materialize(incoming)
@@ -358,9 +405,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 }
             }
             mainHandler.post {
-                if (generation != startRequestGeneration || pendingStartRequest !== pending) return@post
-                pendingStartRequest = null
-                sendRequestIngestedTo(replyTo, incoming.request.runId)
+                if (runs.pending(incoming.request.runId) !== pending) return@post
+                pending.subscribers.forEach { sendRequestIngestedTo(it, incoming.request.runId) }
                 prepared.fold(
                     onSuccess = { request ->
                         val permissions = AgentRuntimePolicy.permissions(
@@ -370,23 +416,25 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                             request.copy(
                                 config = AgentRuntimePolicy.constrain(request.config, permissions),
                             ),
-                            replyTo,
+                            pending,
                         )
                     },
                     onFailure = { throwable ->
+                        runs.removePending(incoming.request.runId, pending)
                         AndroidAgentLogger.warnThrottled("runtime_request_prepare_failed") {
                             "Agent runtime request preparation failed: type=${throwable.safeLogType()}"
                         }
-                        finishWithFailure(
-                            when (throwable) {
-                                is AgentRuntimeImageTransfer.ImageTransferException ->
-                                    throwable.message ?: "Agent Runtime 无法读取图片"
-                                is RuntimeConfigUnavailableException ->
-                                    "请先在 Eta 中配置可用的模型"
-                                else -> "Agent Runtime 无法准备请求"
-                            },
-                            replyTo,
-                        )
+                        val message = when (throwable) {
+                            is AgentRuntimeImageTransfer.ImageTransferException ->
+                                throwable.message ?: "Agent Runtime 无法读取图片"
+                            is RuntimeConfigUnavailableException ->
+                                "请先在 Eta 中配置可用的模型"
+                            else -> "Agent Runtime 无法准备请求"
+                        }
+                        pending.subscribers.forEach { target ->
+                            sendResultTo(target, AgentRuntimeWire.RunResult(incoming.request.runId, false, "", message))
+                        }
+                        if (runs.isEmpty()) finishWithFailure(message)
                     },
                 )
             }
@@ -395,20 +443,15 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
 
     private fun startRun(
         request: AgentRuntimeWire.RunRequest,
-        replyTo: Messenger? = null,
+        pending: PendingStartRequest,
     ) {
         val automated = io.github.mangi.eta.agent.automation.AgentTaskScheduler.isRegistered(request.runId)
-        if (automated && activeSession?.isTerminal == false) {
-            sendResultTo(replyTo, AgentRuntimeWire.RunResult(request.runId, false, "", "AUTOMATION_RUNTIME_BUSY"))
-            return
-        }
-        val reviewGeneration = AgentExperienceReview.foregroundStarted()
-        activeSession?.controller?.cancel()
+        val subscribers = pending.subscribers.toList()
         val session = AgentRuntimeSession(
             runId = request.runId,
             operation = request.operation,
             eventSink = { event ->
-                val current = activeSession?.takeIf { it.runId == request.runId }
+                val current = runs.active(request.runId)?.session
                 if (current != null && !current.primaryDisplay.get() && event is AgentEvent.ToolStarted &&
                     (event.name in VirtualScreenRoutingPolicy.uiTools || event.name == "virtual_screen") &&
                     runBlocking { SettingsDataStore.settings() }.virtualScreenEnabled
@@ -416,10 +459,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     current.virtualUiRouted.set(true)
                 }
                 val virtualScreen = current?.let { usesVirtualUi(it) } == true
-                sendEventTo(replyTo, event, virtualScreen)
+                subscribers.forEach { sendEventTo(it, event, virtualScreen) }
             },
             resultSink = { result ->
-                sendResultTo(replyTo, result)
+                publishRunResult(result, subscribers)
             },
         )
         val primaryDisplay = ConversationDisplayRoute.usesPrimary(this, request.handoff
@@ -434,14 +477,47 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             this, "run:${request.runId}", allowBoundFallback = allowBoundFallback,
         ) { session.controller.cancel() }
         if (!executionHeld && !allowBoundFallback) {
+            runs.removePending(request.runId, pending)
             session.complete(AgentRuntimeWire.RunResult(
                 runId = request.runId, ok = false, content = "",
                 error = "无法启动后台执行服务，请返回 Eta 后重试",
             )) {}
+            if (runs.isEmpty()) dismissAndStop()
             return
         }
-        activeSession = session
+        val run = RuntimeRun(request, session)
+        if (!runs.promote(request.runId, pending, run)) {
+            session.controller.cancel()
+            AgentExecutionService.release("run:${request.runId}")
+            return
+        }
+        val reviewGeneration = AgentExperienceReview.foregroundStarted()
         lastCompletedRunContext = null
+        selectNewRun(run)
+        updateKeepScreenOn()
+        val screenOnBinding = session.controller.register {
+            mainHandler.post { updateKeepScreenOn() }
+        }
+        thread(name = "agent-runtime-${request.runId.take(8)}") {
+            try {
+                executeRun(session, request, reviewGeneration)
+            } finally {
+                screenOnBinding.close()
+                mainHandler.post {
+                    // A direct session cancellation may have won the terminal commit race.
+                    // Retire that run as well, without taking down any other conversation.
+                    if (runs.removeActive(session.runId, run)) {
+                        if (activeSession === session) selectNextRun()
+                        updateKeepScreenOn()
+                        if (runs.isEmpty() && activeSession == null && resultCardView == null) dismissAndStop()
+                    }
+                }
+                AgentExecutionService.release("run:${request.runId}")
+            }
+        }
+    }
+
+    private fun holdRuntimeService() {
         runCatching {
             startService(Intent(this, AgentRuntimeService::class.java).setAction(ACTION_KEEP_ALIVE))
         }.onFailure { throwable ->
@@ -449,14 +525,22 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 "Agent runtime keep-alive start failed: type=${throwable.safeLogType()}"
             }
         }
+    }
+
+    /** Only the selected run owns the shared capsule and its pause/stop/steer controls. */
+    private fun selectNewRun(run: RuntimeRun) {
+        val interactionOwner = runs.activeValues().firstOrNull { it.hasInteractionLease && !it.session.isTerminal }
+        if (interactionOwner == null) selectRun(run)
+    }
+
+    private fun selectRun(run: RuntimeRun) {
+        removeOverlayWindows()
+        activeSession = run.session
         mainHandler.removeCallbacksAndMessages(hideToken)
-        if (usesVirtualUi(session, runBlocking { SettingsDataStore.settings() }.virtualScreenEnabled)) {
-            removeOverlayWindows()
-        }
-        state.value = AgentOverlayState.Initial
+        state.value = run.overlayState
         capsuleExpanded.value = false
-        setCapsuleWindowHeight(CAPSULE_COLLAPSED_HEIGHT_DP)
-        hasExecutedForegroundTool = false
+        hasExecutedForegroundTool = run.hasExecutedForegroundTool
+        val request = run.request
         resultConversationId = request.handoff
             ?.takeIf { it.source == AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE }
             ?.let { AgentUiHandoffPayload.from(it.payload).conversationId }
@@ -469,34 +553,22 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     ?.takeIf(String::isNotBlank)
                     ?.let { key -> handoff.source to key }
             }
-        synchronized(supplementsLock) {
-            activeSupplements.clear()
-            nextSupplementIndex = 1
-            if (request.handoff?.source == AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
-                val payload = AgentUiHandoffPayload.from(request.handoff.payload)
-                activeSupplements += payload.supplements
-                nextSupplementIndex = payload.lastSupplementIndex + 1
-            }
+        if (run.hasExecutedForegroundTool && !usesVirtualUi(run.session)) {
+            ensureOverlayVisible()
         }
+    }
 
-        updateKeepScreenOn()
-        val screenOnBinding = session.controller.register {
-            mainHandler.post {
-                if (activeSession === session) updateKeepScreenOn()
-            }
+    private fun selectNextRun(): Boolean {
+        val remaining = runs.activeValues().filter { !it.session.isTerminal }
+        val next = remaining.firstOrNull { it.hasInteractionLease } ?: remaining.lastOrNull()
+        if (next != null) {
+            selectRun(next)
+            return true
         }
-        thread(name = "agent-runtime") {
-            try {
-                executeRun(session, request, reviewGeneration)
-            } finally {
-                screenOnBinding.close()
-                mainHandler.post {
-                    if (activeSession === session) setKeepScreenOn(false)
-                }
-                AgentExecutionService.updateRunStatus(this, null)
-                AgentExecutionService.release("run:${request.runId}")
-            }
-        }
+        activeSession = null
+        removeOverlayWindows()
+        AgentExecutionService.updateRunStatus(this, null)
+        return false
     }
 
     private fun executeRun(
@@ -509,6 +581,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             reviewGeneration = reviewGeneration,
             currentPermissions = ::currentRuntimePermissions,
             snapshotRequest = { it.withActiveSupplements() },
+            onInteractionAcquired = { markInteractionOwner(session) },
             onAcceptedEvent = { event, entrySurfaceGuard ->
                 AgentExecutionService.updateProgress("run:${request.runId}", event)
                 handleAcceptedRunEvent(session, event, entrySurfaceGuard)
@@ -531,39 +604,55 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         )
     }
 
+    private fun markInteractionOwner(session: AgentRuntimeSession) {
+        mainHandler.post {
+            val run = runs.active(session.runId)?.takeIf { it.session === session } ?: return@post
+            if (session.isTerminal) return@post
+            run.hasInteractionLease = true
+            if (!usesVirtualUi(session)) run.hasExecutedForegroundTool = run.foregroundToolStarted
+            if (activeSession !== session) selectRun(run)
+            hasExecutedForegroundTool = run.hasExecutedForegroundTool
+            if (run.revealAfterInteraction && !usesVirtualUi(session)) ensureOverlayVisible()
+        }
+    }
+
     private fun handleAcceptedRunEvent(
         session: AgentRuntimeSession,
         event: AgentEvent,
         entrySurfaceGuard: EntrySurfaceGuard?,
     ) {
-        if (activeSession !== session) return
+        val run = runs.active(session.runId)?.takeIf { it.session === session } ?: return
         val revealsOperation = AgentOverlayVisibilityPolicy.shouldRevealFor(event)
         val dismissesEntrySurface = AgentOverlayVisibilityPolicy.shouldDismissEntrySurfaceFor(event)
         val virtualScreenEnabled = (revealsOperation || dismissesEntrySurface || event is AgentEvent.ToolStarted) &&
             runBlocking { SettingsDataStore.settings() }.virtualScreenEnabled
         val virtualUi = usesVirtualUi(session, virtualScreenEnabled)
         val revealsForegroundOperation = !virtualUi && revealsOperation
-        val requiresEntrySurfaceDismissal = !virtualUi && dismissesEntrySurface
-        val entrySurfaceReady = if (requiresEntrySurfaceDismissal && entrySurfaceGuard != null) {
-            runCatching { entrySurfaceGuard.dismissOnce() }.getOrDefault(false)
-        } else {
-            true
-        }
         mainHandler.post {
-            if (activeSession !== session) return@post
-            if (usesVirtualUi(session, virtualScreenEnabled)) removeOverlayWindows()
+            if (runs.active(session.runId) !== run) return@post
+            // Planning and ToolStarted events precede tool admission. They must not dismiss
+            // an entry surface or expose controls for a run still waiting for the UI lease.
+            if (revealsOperation) run.revealAfterInteraction = true
+            if (AgentOverlayVisibilityPolicy.shouldRecordForegroundExecution(event, entrySurfaceReady = true)) {
+                run.foregroundToolStarted = true
+            }
+            val entrySurfaceReady = entrySurfaceGuard == null || entrySurfaceGuard.wasTriggered
             if (
-                !virtualUi && AgentOverlayVisibilityPolicy.shouldRecordForegroundExecution(
+                run.hasInteractionLease && !virtualUi && AgentOverlayVisibilityPolicy.shouldRecordForegroundExecution(
                     event,
                     entrySurfaceReady,
                 )
             ) {
-                hasExecutedForegroundTool = true
+                run.hasExecutedForegroundTool = true
             }
             if (session.isTerminal) return@post
             runCatching {
-                state.value = state.value.applyEvent(event)
-                if (revealsForegroundOperation && entrySurfaceReady) {
+                run.overlayState = run.overlayState.applyEvent(event)
+                if (activeSession !== session) return@runCatching
+                hasExecutedForegroundTool = run.hasExecutedForegroundTool
+                if (usesVirtualUi(session, virtualScreenEnabled)) removeOverlayWindows()
+                state.value = run.overlayState
+                if (run.hasInteractionLease && revealsForegroundOperation && entrySurfaceReady) {
                     if (capsuleView == null) {
                         AgentHapticFeedback.perform(
                             this,
@@ -602,7 +691,12 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         completedContext: CompletedRunContext? = null,
     ) {
         mainHandler.post {
-            if (activeSession !== session) return@post
+            val run = runs.active(session.runId)?.takeIf { it.session === session } ?: return@post
+            runs.removeActive(session.runId, run)
+            val selected = activeSession === session
+            updateKeepScreenOn()
+            if (!selected) return@post
+            if (selectNextRun()) return@post
             lastCompletedRunContext = completedContext
             val showVirtualResult = AgentTerminalResultPolicy.showVirtualResult(
                 virtualUiRouted = session.virtualUiRouted.get(),
@@ -610,8 +704,6 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 stopped = result.error == "已停止",
                 paused = result.errorCode == "UI_EXECUTION_PAUSED",
             )
-            activeSession = null
-            setKeepScreenOn(false)
             runCatching {
                 if (result.ok) {
                     enterFinalState(
@@ -680,6 +772,13 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         dispatchResultIo { sendResultNow(target, result) }
     }
 
+    private fun publishRunResult(result: AgentRuntimeWire.RunResult, subscribers: List<Messenger>) {
+        // Cache before broadcasting: a client may retry after receiving this result while
+        // the corresponding terminal overlay callback is still queued on Main.
+        runs.active(result.runId)?.terminalResult = result
+        subscribers.forEach { sendResultTo(it, result) }
+    }
+
     private fun sendResultNow(
         target: Messenger?,
         result: AgentRuntimeWire.RunResult,
@@ -744,7 +843,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun sendActiveRun(replyTo: Messenger?) {
         runCatching {
             val msg = Message.obtain(null, AgentRuntimeWire.MSG_QUERY_ACTIVE_RUN_RESPONSE)
-            msg.data = AgentRuntimeWire.ackBundle(activeSession?.runId.orEmpty())
+            val terminalIds = runs.activeValues().filter { it.session.isTerminal }.mapTo(hashSetOf()) { it.session.runId }
+            msg.data = AgentRuntimeWire.activeRunsBundle(runs.runIds().filterNot { it in terminalIds })
             replyTo?.send(msg)
         }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_active_run_delivery_failed") {
@@ -753,17 +853,18 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         }
     }
 
-    private fun attachRun(runId: String, replyTo: Messenger?) {
-        val session = activeSession
+    private fun attachRun(runId: String, replyTo: Messenger?): Boolean {
+        val session = runs.active(runId)?.session
         val attached = replyTo != null &&
             runId.isNotBlank() &&
             session?.runId == runId &&
             session.attach(
-                eventSink = { event -> sendEventTo(replyTo, event) },
+                eventSink = { event -> sendEventTo(replyTo, event, usesVirtualUi(session)) },
                 resultSink = { result -> sendResultTo(replyTo, result) },
                 onReplayComplete = { sendAttachRunResponse(runId, replyTo, attached = true) },
             )
         if (!attached) sendAttachRunResponse(runId, replyTo, attached = false)
+        return attached
     }
 
     private fun sendAttachRunResponse(runId: String, replyTo: Messenger?, attached: Boolean) {
@@ -828,12 +929,13 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun finishWithFailure(
         message: String,
         replyTo: Messenger? = null,
+        runId: String = "",
     ) {
         sendResultTo(
             replyTo,
-            AgentRuntimeWire.RunResult(runId = "", ok = false, content = "", error = message),
+            AgentRuntimeWire.RunResult(runId = runId, ok = false, content = "", error = message),
         )
-        if (activeSession != null) return
+        if (!runs.isEmpty()) return
         enterFinalState(
             AgentOverlayState(
                 phase = AgentOverlayPhase.FAILED,
@@ -854,30 +956,22 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
 
     private fun cancelRun(runId: String) {
         if (runId.isBlank()) return
-        pendingStartRequest?.takeIf { pending -> pending.incoming.request.runId == runId }?.let { pending ->
-            startRequestGeneration++
-            pendingStartRequest = null
+        runs.removePending(runId)?.let { pending ->
             pending.incoming.close()
-            sendRequestIngestedTo(pending.replyTo, runId)
-            sendResultTo(
-                pending.replyTo,
-                AgentRuntimeWire.RunResult(
-                    runId = runId,
-                    ok = false,
-                    content = "",
-                    error = "已停止",
-                ),
-            )
+            pending.subscribers.forEach { target ->
+                sendRequestIngestedTo(target, runId)
+                sendResultTo(target, AgentRuntimeWire.RunResult(runId, false, "", "已停止"))
+            }
+            if (runs.isEmpty()) dismissAndStop()
             return
         }
-        val session = activeSession ?: return
-        if (runId != session.runId) {
-            AndroidAgentLogger.debug { "Agent runtime ignored stale cancel request" }
-            return
-        }
+        val run = runs.active(runId) ?: return
+        val session = run.session
         if (!session.isTerminal) {
             session.controller.cancel()
-            state.value = state.value.copy(status = AgentOverlayStatus.Stopping)
+            run.overlayState = run.overlayState.copy(status = AgentOverlayStatus.Stopping)
+            if (activeSession === session) state.value = run.overlayState
+            updateKeepScreenOn()
         }
     }
 
@@ -902,24 +996,26 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun requestSupplement(text: String, expectedRunId: String? = null): Boolean {
         val supplementText = text.trim()
         if (supplementText.isBlank()) return false
-        if (expectedRunId != null && activeSession?.runId != expectedRunId) return false
-        setCapsuleInputMode(focusable = false)
-        activeSession?.let { session ->
+        val run = (expectedRunId ?: activeSession?.runId)?.let(runs::active)
+        if (expectedRunId != null && run == null) return false
+        if (expectedRunId == null || activeSession === run?.session) setCapsuleInputMode(focusable = false)
+        run?.let {
+            val session = run.session
             val event = session.steer(supplementText) {
-                recordSupplementEvent(supplementText)
+                recordSupplementEvent(run, supplementText)
             }
             if (event == null) {
                 if (!session.isTerminal) {
-                    state.value = state.value.copy(
-                        status = AgentOverlayStatus.Finishing,
-                    )
+                    run.overlayState = run.overlayState.copy(status = AgentOverlayStatus.Finishing)
+                    if (activeSession === session) state.value = run.overlayState
                     return false
                 }
             } else {
                 AndroidAgentLogger.info(
                     "Agent runtime supplement received: index=${event.index}, chars=${event.text.length}"
                 )
-                state.value = state.value.applyEvent(event)
+                run.overlayState = run.overlayState.applyEvent(event)
+                if (activeSession === session) state.value = run.overlayState
                 return true
             }
         }
@@ -936,18 +1032,18 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             response = completed.response,
             supplement = supplementText,
         )
-        startRun(continuationRequest)
+        ingestRunRequest(AgentRuntimeWire.IncomingRunRequest(continuationRequest, emptyList()), null)
         return true
     }
 
-    private fun recordSupplementEvent(text: String, queued: Boolean = false): AgentEvent.UserSupplementReceived {
-        val supplement = synchronized(supplementsLock) {
+    private fun recordSupplementEvent(run: RuntimeRun, text: String, queued: Boolean = false): AgentEvent.UserSupplementReceived {
+        val supplement = synchronized(run.supplementsLock) {
             AgentUiHandoffPayload.Supplement(
-                index = nextSupplementIndex++,
+                index = run.nextSupplementIndex++,
                 text = text,
                 createdAt = System.currentTimeMillis(),
                 queued = queued,
-            ).also { activeSupplements += it }
+            ).also { run.supplements += it }
         }
         return AgentEvent.UserSupplementReceived(
             index = supplement.index,
@@ -964,10 +1060,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         (session.virtualUiRouted.get() || virtualScreenEnabled) && !session.mainScreenFallbackApproved.get()
 
     private fun updateKeepScreenOn() {
-        val session = activeSession
         setKeepScreenOn(
-            session != null && !session.isTerminal &&
-                !session.controller.isCancelled && !session.controller.isPaused,
+            runs.activeValues().any { run ->
+                val session = run.session
+                !session.isTerminal && !session.controller.isCancelled && !session.controller.isPaused
+            },
         )
     }
 
@@ -1368,7 +1465,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         // A bound service may remain alive after stopSelf; release completed conversation context.
         lastCompletedRunContext = null
         removeOverlayWindows()
-        stopSelf()
+        if (runs.isEmpty()) stopSelf()
     }
 
     private fun isMessageSenderAllowed(msg: Message): Boolean {
@@ -1393,7 +1490,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun AgentRuntimeWire.RunRequest.withActiveSupplements(): AgentRuntimeWire.RunRequest {
         val handoff = handoff ?: return this
         if (handoff.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) return this
-        val supplements = synchronized(supplementsLock) { activeSupplements.toList() }
+        val run = runs.active(runId) ?: return this
+        val supplements = synchronized(run.supplementsLock) { run.supplements.toList() }
         if (supplements.isEmpty()) return this
         val payload = AgentUiHandoffPayload.from(handoff.payload).copy(
             supplements = supplements,

@@ -120,9 +120,15 @@ internal class AgentLocalTools(
     /** 会话指定主屏：本轮按虚拟屏关闭处理，不进虚拟屏也不申请回退。 */
     private val primaryDisplay: Boolean = false,
     private val isRunCancelled: () -> Boolean = { false },
+    private val isRunPaused: () -> Boolean = { false },
+    private val hasPendingSteering: () -> Boolean = { false },
+    private val onInteractionAcquired: () -> Unit = {},
 ) : AgentModelClient.ToolExecutor, AutoCloseable {
 
     private val closed = AtomicBoolean(false)
+    private val interactionLease = AgentInteractionLeaseCoordinator.shared.newLease()
+    private val interactionAnnounced = AtomicBoolean(false)
+    private val primaryDisplayPrepared = AtomicBoolean(false)
     private val retainVirtualScreen = AtomicBoolean(false)
     private val pausedVirtualScreen = AtomicBoolean(false)
     private val virtualRouting = VirtualScreenRoutingPolicy(!primaryDisplay && VirtualScreenSession.isOwnedBy(virtualScreenOwner))
@@ -177,33 +183,32 @@ internal class AgentLocalTools(
     private val inspectedGitHubSnapshots =
         ConcurrentHashMap<String, GitHubInspectionSnapshot>()
 
-    init {
-        // 会话上一轮留下的虚拟屏会让同一应用继续开在虚拟屏上；改用主屏前先关掉。
-        if (primaryDisplay) VirtualScreenSession.closeOwner(virtualScreenOwner)
-    }
-
     private fun routeSettings(): Settings = virtualScreenSettings().let {
         if (primaryDisplay) it.copy(virtualScreenEnabled = false, virtualScreenFallbackEnabled = false) else it
     }
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        MainScreenFallbackApproval.cancelOwner(browserRunId)
-        val cancelled = isRunCancelled()
-        val retain = VirtualScreenSession.isOwnedBy(virtualScreenOwner) && !virtualRouting.usesPrimary &&
-            runCatching { deviceDirectToolsEnabled() && rootAvailable() && routeSettings().virtualScreenEnabled }
-                .getOrDefault(false)
-        VirtualScreenSession.releaseRun(virtualScreenOwner, browserRunId, retain,
-            cancelled, paused = pausedVirtualScreen.get() && !cancelled,
-            completed = retainVirtualScreen.get() && !pausedVirtualScreen.get())
-        publishedObservation.set(PublishedObservation())
-        virtualUiTools.invalidateObservation()
-        AgentBrowserSession.interruptAgentAction(browserRunId)
-        webTools.close()
-        terminalController.interruptAll()
-        rootCommandExecutor.close()
-        githubSkillSource?.close()
-        inspectedGitHubSnapshots.clear()
+        try {
+            MainScreenFallbackApproval.cancelOwner(browserRunId)
+            val cancelled = isRunCancelled()
+            val retain = VirtualScreenSession.isOwnedBy(virtualScreenOwner) && !virtualRouting.usesPrimary &&
+                runCatching { deviceDirectToolsEnabled() && rootAvailable() && routeSettings().virtualScreenEnabled }
+                    .getOrDefault(false)
+            VirtualScreenSession.releaseRun(virtualScreenOwner, browserRunId, retain,
+                cancelled, paused = pausedVirtualScreen.get() && !cancelled,
+                completed = retainVirtualScreen.get() && !pausedVirtualScreen.get())
+            publishedObservation.set(PublishedObservation())
+            virtualUiTools.invalidateObservation()
+            if (interactionLease.isOwner) AgentBrowserSession.interruptAgentAction(browserRunId)
+            webTools.close()
+            terminalController.interruptAll()
+            rootCommandExecutor.close()
+            githubSkillSource?.close()
+            inspectedGitHubSnapshots.clear()
+        } finally {
+            interactionLease.close()
+        }
     }
 
     fun capabilitiesForRun(capabilities: AgentToolCapabilities): AgentToolCapabilities =
@@ -222,6 +227,10 @@ internal class AgentLocalTools(
             !deviceDirectToolsEnabled() || !rootAvailable() || !routeSettings().virtualScreenEnabled) {
             return textResult(errorResult("UI_RECOVERY_UNAVAILABLE", "任务或虚拟屏许可已失效，应用未重启"))
         }
+        return withInteractionLease { recoverVirtualUiWithLease() }
+    }
+
+    private fun recoverVirtualUiWithLease(): AgentModelClient.ToolResult {
         when (val decision = beforeToolExecution("virtual_screen")) {
             ToolExecutionDecision.Allow -> Unit
             is ToolExecutionDecision.Reject -> return textResult(errorResult(decision.code, decision.message))
@@ -299,6 +308,32 @@ internal class AgentLocalTools(
             .put("message", "用户已允许本次任务改用主屏。刚才的操作没有重放；需要时重新启动应用，并调用 observe_screen 获取主屏的新观察后再操作。").toString())
 
     override fun execute(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
+        if (AgentInteractionLeaseCoordinator.requiresLease(toolCall.name)) {
+            withInteractionLease { executeToolCall(toolCall) }
+        } else {
+            executeToolCall(toolCall)
+        }
+
+    private inline fun withInteractionLease(action: () -> AgentModelClient.ToolResult): AgentModelClient.ToolResult {
+        if (!interactionLease.enter({ closed.get() || isRunCancelled() || hasPendingSteering() }, isRunPaused)) {
+            return textResult(errorResult(
+                if (hasPendingSteering() && !closed.get() && !isRunCancelled()) "TOOL_SUPERSEDED" else "DISPLAY_CANCELLED",
+                "等待共享界面资源时任务已停止或收到补充指令，本次工具未执行",
+            ))
+        }
+        return try {
+            if (interactionAnnounced.compareAndSet(false, true)) onInteractionAcquired()
+            // Do not close another run's display merely by constructing a text-only executor.
+            if (primaryDisplay && primaryDisplayPrepared.compareAndSet(false, true)) {
+                VirtualScreenSession.closeOwner(virtualScreenOwner)
+            }
+            action()
+        } finally {
+            interactionLease.leave()
+        }
+    }
+
+    private fun executeToolCall(toolCall: AgentModelClient.ToolCall): AgentModelClient.ToolResult =
         runCatching {
             if (closed.get()) return@runCatching textResult(errorResult("DISPLAY_CANCELLED", "任务已结束，本次工具未执行"))
             if (primaryDisplay && toolCall.name == "virtual_screen") {
